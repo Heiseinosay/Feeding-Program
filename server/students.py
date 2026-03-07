@@ -352,3 +352,173 @@ def f_update_student_information(data):
         return { 'status': False }
     finally:
         mysqldb.close()
+
+
+
+def f_get_student_attendance(student_id):
+    mysqldb, cursor = connect_to_db()
+    print("Im in f_get_student_attendance!")
+    print("student_id for attendance: ", student_id)
+
+    if not student_id:
+        mysqldb.close()
+        return {
+            "status": False,
+            "message": "Missing studentIId",
+            "sections": [],
+        }
+
+    try:
+        read_query = (
+            """
+                SELECT * 
+                FROM tblAttendance 
+                WHERE student_id = %s
+            """
+        )
+        cursor.execute(read_query, (student_id,))
+        result = cursor.fetchall()
+
+        print(result)
+
+        return { 
+                'status': True,
+                'studentsAttendance': result 
+            }
+    except Error as e:
+        print(f"f_get_student_attendance! Error in inserting student: {e}")
+        return { 'status': False }
+    finally:
+        mysqldb.close()
+
+
+def f_update_student_measurement_targeted(data):
+    mysqldb, cursor = connect_to_db()
+    print("Im on f_update_student_measurement_targeted!")
+
+    student_id = data.get("studentId")
+    user_id = data.get("userId")
+    height = data.get("height")
+    weight = data.get("weight")
+    bmi = data.get("bmi")
+    bmi_status = data.get("bmiStatus")
+
+    if not user_id or not student_id:
+        mysqldb.close()
+        return { 'status': False, 'message': 'Missing userId or studentId' }
+
+    try:
+        def as_json_list(value):
+            if value is None:
+                return []
+
+            if isinstance(value, (bytes, bytearray)):
+                value = value.decode("utf-8")
+
+            parsed = value
+            if isinstance(value, str):
+                raw = value.strip()
+                if not raw:
+                    return []
+                try:
+                    parsed = json.loads(raw)
+                except Exception:
+                    return [raw]
+
+            if isinstance(parsed, list):
+                return parsed
+            return [parsed]
+
+        def clean_status(value):
+            if value is None:
+                return "normal"
+            status = str(value).strip()
+            if not status:
+                return "normal"
+            if status.startswith('"') and status.endswith('"'):
+                try:
+                    status = json.loads(status)
+                except Exception:
+                    status = status.strip('"')
+            return str(status).strip().lower() or "normal"
+
+        try:
+            bmi_value = round(float(bmi), 1)
+            height_value = round(float(height), 1)
+            weight_value = round(float(weight), 1)
+        except (TypeError, ValueError):
+            return { 'status': False, 'message': 'Invalid measurement values' }
+
+        if height_value <= 0 or weight_value <= 0:
+            return { 'status': False, 'message': 'Invalid measurement values' }
+
+        select_query = """
+            SELECT bmi, bmi_measurement, measurement_date
+            FROM tblStudents
+            WHERE student_id=%s AND teacher_id=%s
+            LIMIT 1
+        """
+        cursor.execute(select_query, (student_id, user_id))
+        existing = cursor.fetchone()
+        if not existing:
+            return { 'status': False, 'message': 'Student not found' }
+
+        bmi_history = as_json_list(existing[0])
+        status_history = [clean_status(v) for v in as_json_list(existing[1])]
+        date_history = [str(v)[:10] for v in as_json_list(existing[2])]
+
+        today = date.today().isoformat()
+        next_status = clean_status(bmi_status)
+
+        if date_history and date_history[-1] == today:
+            if bmi_history:
+                bmi_history[-1] = bmi_value
+            else:
+                bmi_history.append(bmi_value)
+
+            if status_history:
+                status_history[-1] = next_status
+            else:
+                status_history.append(next_status)
+        else:
+            bmi_history.append(bmi_value)
+            status_history.append(next_status)
+            date_history.append(today)
+
+        update_query = """
+            UPDATE tblStudents
+            SET
+                height_cm=%s,
+                weight_kg=%s,
+                bmi=%s,
+                bmi_measurement=%s,
+                measurement_date=%s
+            WHERE student_id=%s AND teacher_id=%s
+        """
+
+        cursor.execute(
+            update_query,
+            (
+                height_value,
+                weight_value,
+                json.dumps(bmi_history),
+                json.dumps(status_history),
+                json.dumps(date_history),
+                student_id,
+                user_id,
+            ),
+        )
+        mysqldb.commit()
+
+        return {
+            'status': True,
+            'studentId': student_id,
+            'bmi': bmi_value,
+            'bmiStatus': next_status,
+            'measurementDate': today,
+        }
+    except Error as e:
+        print(f"Error in updating student targeted measurement: {e}")
+        return { 'status': False }
+    finally:
+        mysqldb.close()

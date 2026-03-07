@@ -136,6 +136,11 @@
   top: 0;
 }
 
+.feeding-panel-content.is-editing {
+  /* border-left: 3px solid #f59e0b; */
+  background: linear-gradient(to bottom, #fffbeb 0%, #ffffff 22%);
+}
+
 .feeding-panel-header {
   margin-bottom: 1.5rem;
 }
@@ -651,10 +656,42 @@
   box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.08);
 }
 
+.feeding-calendar-cell.holiday {
+  background-color: #e0e0e0;
+  /* border-color: #fde68a; */
+  border: 1px solid #e5e7eb;
+}
+
+.feeding-calendar-dayhead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.25rem;
+}
+
 .feeding-calendar-daynum {
   font-size: 0.8125rem;
   font-weight: 700;
   color: #374151;
+}
+
+.feeding-holiday-tag {
+  max-width: 75%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 9999px;
+  background-color: #fee2e2;
+  color: #991b1b;
+  font-size: 0.625rem;
+  line-height: 1.1;
+  font-weight: 700;
+  padding: 0.2rem 0.45rem;
+}
+
+.feeding-holiday-tag.special {
+  background-color: #dbeafe;
+  color: #1e40af;
 }
 
 .feeding-calendar-events {

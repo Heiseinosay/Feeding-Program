@@ -1,26 +1,77 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Cropper from "react-easy-crop";
 import { useNavigate } from "react-router";
+import { Helmet } from 'react-helmet'
+import axios from 'axios';
+
 import "../styles/ProfileStyle.css";
 import "../styles/DashboardStyle.css";
-import { logout } from "../api";
+
+import { initAuth, logout } from "../api";
+import Loading from "../components/Loading";
 import Logo from "../images/logo.png";
+
 
 export default function Profile() {
   const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  const mapUserToFormData = (data) => ({
+    firstName: data?.first_name || "",
+    lastName: data?.last_name || "",
+    email: data?.email || "",
+    mobile: data?.mobile_no || data?.mobile || "",
+    schoolName: data?.school_name || data?.schoolName || "",
+  });
+
+  const formatDisplayDate = (value) => {
+    if (!value) return "No data";
+    const raw = String(value).trim();
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    const hasTimezone = /(gmt|utc|z|[+-]\d{2}:?\d{2})$/i.test(raw);
+    return parsed.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      ...(hasTimezone ? { timeZone: "UTC" } : {}),
+    });
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadUser = async () => {
+      const data = await initAuth();
+      if (!isMounted) {
+        return;
+      }
+      if (data?.status) {
+        setUser(data);
+      } else {
+        navigate("/");
+      }
+      setCheckingAuth(false);
+    };
+    loadUser();
+    return () => {
+      isMounted = false;
+    };
+  }, [navigate]);
 
   // Personal information form state
   const [formData, setFormData] = useState({
-    firstName: "Maria",
-    lastName: "Torres",
-    email: "maria.torres@school.edu.ph",
-    mobile: "+63 912 345 6789",
-    schoolName: "San Miguel Elementary School",
+    firstName: "",
+    lastName: "",
+    email: "",
+    mobile: "",
+    schoolName: "",
   });
 
   const [originalFormData, setOriginalFormData] = useState({ ...formData });
   const [formErrors, setFormErrors] = useState({});
   const [isEdited, setIsEdited] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // Profile photo state
   const [profileImage, setProfileImage] = useState(null);
@@ -34,24 +85,88 @@ export default function Profile() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
 
-  // Assigned sections data
-  const assignedSections = [
-    { id: 1, name: "Grade 3 - Section A", students: 45 },
-    { id: 2, name: "Grade 4 - Section B", students: 42 },
-    { id: 3, name: "Grade 5 - Section A", students: 38 },
-  ];
+  const triggerToast = (message) => {
+    setToastMessage(message);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    // console.loogggg
+    const next = mapUserToFormData(user);
+    setFormData(next);
+    setOriginalFormData(next);
+    setFormErrors({});
+    setIsEdited(false);
+  }, [user]);
+
+
+  // GET ALL SECTION
+  const [sections, setSections] = useState([])
+  useEffect(() => {
+        if (!user?.id) {
+            return;
+        }
+
+        axios.get("/api/get_all_section", {
+            params: {
+                userId: user.id,
+            }
+        })
+        .then((response) => {
+            const data = response.data;
+            console.log(data)
+            if (!data?.status) {
+                setSections([]);
+                return;
+            }
+
+            const fetchedSections = (data.sections || []).map((section) => ({
+                ...section,
+                createdAt: section.createdAt
+                    ? new Date(section.createdAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                    })
+                    : "",
+            }));
+            setSections(fetchedSections);
+        })
+        .catch((error) => {
+            console.error("Fetching sections error:", error);
+        });
+    }, [user?.id]);
 
   // Account info data
   const accountInfo = {
-    teacherId: "TCH-2024-0157",
-    role: "Teacher",
-    dateJoined: "August 15, 2023",
-    lastLogin: "February 16, 2026 - 9:15 AM",
+    teacherId: user?.id ?? "No data",
+    role: user?.role || "Teacher",
+    dateJoined: formatDisplayDate(user?.date_joined || user?.created_at),
+    lastLogin: formatDisplayDate(new Date()),
   };
 
   // Handle form input changes
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
+    const { name } = e.target;
+    let value = e.target.value;
+
+    if (name === "firstName" || name === "lastName") {
+      if (/[^A-Za-z\s]/.test(value)) {
+        return;
+      }
+    }
+
+    if (name === "mobile") {
+      if (!/^\d*$/.test(value)) {
+        return;
+      }
+      value = value.slice(0, 11);
+    }
+
     setFormData((prev) => ({
       ...prev,
       [name]: value,
@@ -70,22 +185,36 @@ export default function Profile() {
   // Validate form
   const validateForm = () => {
     const errors = {};
+    const firstName = String(formData.firstName || "").trim();
+    const lastName = String(formData.lastName || "").trim();
+    const mobile = String(formData.mobile || "").trim();
+    const schoolName = String(formData.schoolName || "").trim();
+    const email = String(formData.email || "").trim();
+    const lettersOnlyPattern = /^[A-Za-z\s]+$/;
 
-    if (!formData.firstName.trim()) {
+    if (!firstName) {
       errors.firstName = "First name is required";
+    } else if (!lettersOnlyPattern.test(firstName)) {
+      errors.firstName = "First name must contain letters only.";
     }
-    if (!formData.lastName.trim()) {
+    if (!lastName) {
       errors.lastName = "Last name is required";
+    } else if (!lettersOnlyPattern.test(lastName)) {
+      errors.lastName = "Last name must contain letters only.";
     }
-    if (!formData.email.trim()) {
+    if (!email) {
       errors.email = "Email is required";
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+    } else if (!/\S+@\S+\.\S+/.test(email)) {
       errors.email = "Please enter a valid email address";
     }
-    if (!formData.mobile.trim()) {
+    if (!mobile) {
       errors.mobile = "Mobile number is required";
+    } else if (!/^\d+$/.test(mobile)) {
+      errors.mobile = "Mobile number must contain digits only.";
+    } else if (mobile.length !== 11) {
+      errors.mobile = "Mobile number must be exactly 11 digits.";
     }
-    if (!formData.schoolName.trim()) {
+    if (!schoolName) {
       errors.schoolName = "School name is required";
     }
 
@@ -95,13 +224,59 @@ export default function Profile() {
 
   // Handle save changes
   const handleSaveChanges = () => {
-    if (validateForm()) {
-      setOriginalFormData({ ...formData });
-      setIsEdited(false);
-      setToastMessage("Profile updated successfully!");
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 3000);
+    if (isSavingProfile) {
+      return;
     }
+
+    if (!validateForm()) {
+      return;
+    }
+
+    if (!user?.id) {
+      alert("Missing user info. Please try again.");
+      return;
+    }
+
+    const payload = {
+      userId: user.id,
+      firstName: String(formData.firstName || "").trim(),
+      lastName: String(formData.lastName || "").trim(),
+      mobileNo: String(formData.mobile || "").trim(),
+    };
+
+    setIsSavingProfile(true);
+    axios.post("/api/auth_update_user_information", payload)
+      .then((response) => {
+        const status = response.data?.status;
+        if (!status) {
+          alert("Something went wrong. Try again later!");
+          return;
+        }
+
+        const nextFormData = {
+          ...formData,
+          firstName: payload.firstName,
+          lastName: payload.lastName,
+          mobile: payload.mobileNo,
+        };
+        setFormData(nextFormData);
+        setOriginalFormData(nextFormData);
+        setIsEdited(false);
+        setUser((prev) => ({
+          ...(prev || {}),
+          first_name: payload.firstName,
+          last_name: payload.lastName,
+          mobile_no: payload.mobileNo,
+        }));
+        triggerToast("Profile updated successfully!");
+      })
+      .catch((error) => {
+        console.error("Updating profile error:", error);
+        alert("An error occurred during profile update.");
+      })
+      .finally(() => {
+        setIsSavingProfile(false);
+      });
   };
 
   // Handle cancel
@@ -118,17 +293,13 @@ export default function Profile() {
       // Validate file type
       const validTypes = ["image/jpeg", "image/jpg", "image/png"];
       if (!validTypes.includes(file.type)) {
-        setToastMessage("Please upload a valid image file (JPG, JPEG, PNG)");
-        setShowToast(true);
-        setTimeout(() => setShowToast(false), 3000);
+        triggerToast("Please upload a valid image file (JPG, JPEG, PNG)");
         return;
       }
 
       // Validate file size (max 5MB)
       if (file.size > 5 * 1024 * 1024) {
-        setToastMessage("File size must be less than 5MB");
-        setShowToast(true);
-        setTimeout(() => setShowToast(false), 3000);
+        triggerToast("File size must be less than 5MB");
         return;
       }
 
@@ -155,9 +326,7 @@ export default function Profile() {
       );
       setProfileImage(croppedImage);
       setShowCropper(false);
-      setToastMessage("Profile photo updated successfully!");
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 3000);
+      triggerToast("Profile photo updated successfully!");
     } catch (e) {
       console.error(e);
     }
@@ -174,9 +343,7 @@ export default function Profile() {
   // Remove profile photo
   const handleRemovePhoto = () => {
     setProfileImage(null);
-    setToastMessage("Profile photo removed");
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 3000);
+    triggerToast("Profile photo removed");
   };
 
   // Get teacher initials
@@ -199,9 +366,24 @@ export default function Profile() {
     navigate("/");
   };
 
+  if (checkingAuth) {
+    return (
+      <div className="comp-loading">
+        <Loading />
+      </div>
+    );
+  }
+
+  if (user == null) {
+    return null;
+  }
+
   return (
     <div className="profile-container">
       {/* Left Sidebar */}
+      <Helmet>
+          <title>Feeding Program | Profile</title>
+      </Helmet>
       <aside className="dashboard-sidebar">
         <div className="dashboard-logo">
           <div className="dashboard-logo-icon">
@@ -347,6 +529,7 @@ export default function Profile() {
                           formErrors.firstName ? "error" : ""
                         }`}
                         placeholder="Enter first name"
+                        maxLength={25}
                       />
                       {formErrors.firstName && (
                         <span className="profile-form-error">
@@ -368,6 +551,7 @@ export default function Profile() {
                           formErrors.lastName ? "error" : ""
                         }`}
                         placeholder="Enter last name"
+                        maxLength={25}
                       />
                       {formErrors.lastName && (
                         <span className="profile-form-error">
@@ -376,8 +560,30 @@ export default function Profile() {
                       )}
                     </div>
                   </div>
+                  
+                  <div className="profile-form-field is-disabled">
+                    <label className="profile-form-label required">
+                      School Name
+                    </label>
+                    <input
+                      type="text"
+                      name="schoolName"
+                      value={formData.schoolName}
+                      onChange={handleInputChange}
+                      className={`profile-form-input ${
+                        formErrors.schoolName ? "error" : ""
+                      }`}
+                      placeholder="Enter school name"
+                      disabled
+                    />
+                    {formErrors.schoolName && (
+                      <span className="profile-form-error">
+                        {formErrors.schoolName}
+                      </span>
+                    )}
+                  </div>
 
-                  <div className="profile-form-field">
+                  <div className="profile-form-field is-disabled">
                     <label className="profile-form-label required">
                       Email Address
                     </label>
@@ -390,6 +596,7 @@ export default function Profile() {
                         formErrors.email ? "error" : ""
                       }`}
                       placeholder="Enter email address"
+                      disabled
                     />
                     {formErrors.email && (
                       <span className="profile-form-error">
@@ -411,6 +618,8 @@ export default function Profile() {
                         formErrors.mobile ? "error" : ""
                       }`}
                       placeholder="Enter mobile number"
+                      maxLength={11}
+                      inputMode="numeric"
                     />
                     {formErrors.mobile && (
                       <span className="profile-form-error">
@@ -419,26 +628,7 @@ export default function Profile() {
                     )}
                   </div>
 
-                  <div className="profile-form-field">
-                    <label className="profile-form-label required">
-                      School Name
-                    </label>
-                    <input
-                      type="text"
-                      name="schoolName"
-                      value={formData.schoolName}
-                      onChange={handleInputChange}
-                      className={`profile-form-input ${
-                        formErrors.schoolName ? "error" : ""
-                      }`}
-                      placeholder="Enter school name"
-                    />
-                    {formErrors.schoolName && (
-                      <span className="profile-form-error">
-                        {formErrors.schoolName}
-                      </span>
-                    )}
-                  </div>
+                 
                 </div>
 
                 <div className="profile-form-actions">
@@ -451,10 +641,11 @@ export default function Profile() {
                   </button>
                   <button
                     className="profile-button-primary"
-                    onClick={handleSaveChanges}
-                    disabled={!isEdited}
+                    // onClick={handleSaveChanges}
+                    // disabled={!isEdited || isSavingProfile}
+                    disabled
                   >
-                    Save Changes
+                    {isSavingProfile ? "Saving..." : "Save Changes"}
                   </button>
                 </div>
               </div>
@@ -483,28 +674,37 @@ export default function Profile() {
                 </div>
 
                 <div className="profile-sections-list">
-                  {assignedSections.map((section) => (
-                    <div key={section.id} className="profile-section-item">
-                      <div className="profile-section-icon">
-                        <svg
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-                          />
-                        </svg>
-                      </div>
+                  {sections.length === 0 ? (
+                    <div className="profile-section-item">
                       <div className="profile-section-info">
-                        <h3>{section.name}</h3>
-                        <p>{section.students} students</p>
+                        <h3>No sections assigned</h3>
+                        <p>No data</p>
                       </div>
                     </div>
-                  ))}
+                  ) : (
+                    sections.map((section) => (
+                      <div key={section.id} className="profile-section-item">
+                        <div className="profile-section-icon">
+                          <svg
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                            />
+                          </svg>
+                        </div>
+                        <div className="profile-section-info">
+                          <h3>{section.name}</h3>
+                          <p>{section.grade || "No grade level"}</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
 
                 <div className="profile-helper-text">
@@ -756,7 +956,12 @@ export default function Profile() {
       {/* Toast Notification */}
       {showToast && (
         <div className="profile-toast">
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg
+            className="profile-toast-icon"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -764,7 +969,24 @@ export default function Profile() {
               d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          <span>{toastMessage}</span>
+          <div className="profile-toast-content">
+            <h3 className="profile-toast-title">Success!</h3>
+            <p className="profile-toast-message">{toastMessage}</p>
+          </div>
+          <button
+            className="profile-toast-close"
+            onClick={() => setShowToast(false)}
+            type="button"
+          >
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
         </div>
       )}
     </div>

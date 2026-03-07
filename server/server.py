@@ -14,10 +14,11 @@ from flask_jwt_extended import (
 )
 
 from dbutils import connect_to_db
-from auth import f_auth_login, f_me, f_auth_first_update_password
-from students import f_get_all_students, f_add_students, f_add_students_attendance, f_delete_student, f_update_bmi_measurement, f_update_student_information
+from auth import f_auth_login, f_me, f_auth_first_update_password, f_auth_update_user_information
+from students import f_get_all_students, f_add_students, f_add_students_attendance, f_delete_student, f_update_bmi_measurement, f_update_student_information, f_get_student_attendance, f_update_student_measurement_targeted
 from section import f_add_section, f_get_all_section, f_delete_section, f_update_section
-from session import f_get_all_session, f_add_session, f_set_cancel_session, f_set_complete_session, f_delete_session, f_update_session_information
+from session import f_get_all_session, f_add_session, f_set_cancel_session, f_set_complete_session, f_delete_session, f_update_session_information, f_get_nearest_upcoming_session, f_get_total_completed_session
+from charts import f_get_all_status_count
 
 # to run python -m flask run
 
@@ -98,6 +99,15 @@ def auth_first_update_password():
     res = f_auth_first_update_password(data)
     print(res)
     print("f_auth_first_update_password here 5")
+    return jsonify(res)
+
+
+# Update user inforrmation
+@app.route("/api/auth_update_user_information", methods=["POST"])
+def auth_update_user_information():
+    data = request.json
+    res = f_auth_update_user_information(data)
+    print(res)
     return jsonify(res)
 
 
@@ -194,7 +204,25 @@ def update_student_information():
     res = f_update_student_information(data)
     print(res)
     return jsonify(res)
-    
+
+
+# Fetch all students attendance
+@app.route("/api/get_student_attendance", methods=["GET"])
+def get_student_attendance():
+    student_id = request.args.get("studentId")
+    res = f_get_student_attendance(student_id)
+    print(res)
+    return res
+
+
+# Update Students information
+@app.route("/api/update_student_measurement_targeted", methods=["POST"])
+def update_student_measurement_targeted():
+    data = request.json
+    res = f_update_student_measurement_targeted(data)
+    print(res)
+    return jsonify(res)
+
 
 #** SESSION PROCESS ==================================================================
 # Fetch all session
@@ -251,8 +279,35 @@ def update_session_information():
     return jsonify(res)
 
 
+# Fetch all nearest session
+@app.route("/api/get_nearest_upcoming_session", methods=["GET"])
+def get_nearest_upcoming_session():
+    user_id = request.args.get("userId")
+    res = f_get_nearest_upcoming_session(user_id)
+    print(res)
+    return res
 
 
+# Fetch total completed session
+@app.route("/api/get_total_completed_session", methods=["GET"])
+def get_total_completed_session():
+    user_id = request.args.get("userId")
+    res = f_get_total_completed_session(user_id)
+    print(res)
+    return res
+
+
+
+
+
+#** ANALYSIS  ==================================================================
+# Fetch all aggreggated total students by status
+@app.route("/api/get_all_status_count", methods=["GET"])
+def get_all_status_count():
+    user_id = request.args.get("userId")
+    res = f_get_all_status_count(user_id)
+    print(res)
+    return res
 
 
 

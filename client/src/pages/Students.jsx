@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import '../styles/StudentsStyle.css'
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import axios from 'axios';
 import { Helmet } from 'react-helmet'
 import { apiFetch, initAuth, logout } from "../api";
@@ -14,21 +14,29 @@ import Logo from '../images/logo.png'
 
 function Students() {
     const navigate = useNavigate()
+    const location = useLocation()
     const [user, setUser] = useState(null);
+    const [checkingAuth, setCheckingAuth] = useState(true);
 
     useEffect(() => {
         let isMounted = true;
         const loadUser = async () => {
             const data = await initAuth();
-            if (isMounted && data?.status) {
-                setUser(data);
+            if (!isMounted) {
+                return;
             }
+            if (data?.status) {
+                setUser(data);
+            } else {
+                navigate("/");
+            }
+            setCheckingAuth(false);
         };
         loadUser();
         return () => {
             isMounted = false;
         };
-    }, []);
+    }, [navigate]);
 
     // SECTIONS
     const [showAddSectionModal, setShowAddSectionModal] = useState(false);
@@ -84,25 +92,6 @@ function Students() {
             year: 'numeric'
         });
 
-        const gradeValue = sectionGrade.toLowerCase();
-        let gradeLevel = sectionGrade.trim();
-        if (gradeValue.startsWith("grade")) {
-            gradeLevel = sectionGrade.slice(5).trim();
-        } else if (["pre-elementary", "pre elementary", "preelementary"].includes(gradeValue)) {
-            gradeLevel = "0";
-        }
-
-        const userId = user?.id ?? "";
-        const lastName = user?.last_name ?? "";
-        const sectionId = `${userId}_${lastName}_${sectionName}${gradeLevel}`.replace(/\s+/g, "");
-
-        const newSection = {
-            id: sectionId,
-            name: sectionName,
-            grade: sectionGrade,
-            createdAt: currentDate,
-        };
-
         const payload = {
             sectionName,
             grade: sectionGrade,
@@ -114,11 +103,19 @@ function Students() {
         .then((res) => {
             console.log(res)
             const status = res.data.status
+            const createdSectionId = String(res.data.sectionId || "").trim();
             console.log(status)
-            if (!status) {
+            if (!status || !createdSectionId) {
                 alert("Something went wrong. Try again later!")
                 return
             }
+
+            const newSection = {
+                id: createdSectionId,
+                name: sectionName,
+                grade: sectionGrade,
+                createdAt: currentDate,
+            };
 
             setSections(prev => [...prev, newSection]);
             setShowAddSectionModal(false);
@@ -285,7 +282,7 @@ function Students() {
         }
 
         const confirmDelete = window.confirm(
-        `Delete ${editingSection.name}? This cannot be undone.`
+        `Delete ${editingSection.name} and students in it? This cannot be undone.`
         );
 
         if (!confirmDelete) {
@@ -311,6 +308,44 @@ function Students() {
             );
 
             setSections(nextSections);
+
+            const deletedSectionId = String(editingSection.id || "").trim();
+            const deletedSectionName = String(editingSection.name || "").trim().toLowerCase();
+
+            setStudents((prev) =>
+            prev.filter((student) => {
+                const sectionId = String(student?.sectionId ?? "").trim();
+                const sectionName = String(student?.section ?? "").trim().toLowerCase();
+                const isDeletedSection =
+                (deletedSectionId && sectionId === deletedSectionId) ||
+                (deletedSectionName && sectionName === deletedSectionName);
+                return !isDeletedSection;
+            })
+            );
+
+            setRawStudents((prev) =>
+            prev.filter((student) => {
+                if (Array.isArray(student)) {
+                const sectionId = String(student[6] ?? "").trim();
+                const sectionName = String(student[7] ?? "").trim().toLowerCase();
+                const isDeletedSection =
+                    (deletedSectionId && sectionId === deletedSectionId) ||
+                    (deletedSectionName && sectionName === deletedSectionName);
+                return !isDeletedSection;
+                }
+
+                const sectionId = String(student?.section_id ?? student?.sectionId ?? "").trim();
+                const sectionName = String(
+                student?.section_name ?? student?.sectionName ?? student?.section ?? ""
+                )
+                .trim()
+                .toLowerCase();
+                const isDeletedSection =
+                (deletedSectionId && sectionId === deletedSectionId) ||
+                (deletedSectionName && sectionName === deletedSectionName);
+                return !isDeletedSection;
+            })
+            );
 
             if (activeSection && activeSection.id === editingSection.id) {
             setActiveSection(nextSections[0] || null);
@@ -346,50 +381,23 @@ function Students() {
     const [searchQuery, setSearchQuery] = useState("");
     const [activeFilter, setActiveFilter] = useState("all");
     const [selectedStudent, setSelectedStudent] = useState(null);
+    const [studentAttendanceCache, setStudentAttendanceCache] = useState({});
+    const [studentAttendanceLoadingIds, setStudentAttendanceLoadingIds] = useState({});
     const [measurementOpen, setMeasurementOpen] = useState(false);
     const [measurementActiveSectionId, setMeasurementActiveSectionId] = useState(null);
     const [measurementDrafts, setMeasurementDrafts] = useState({});
+    const [targetedMeasurementOpen, setTargetedMeasurementOpen] = useState(false);
+    const [targetedMeasurementForm, setTargetedMeasurementForm] = useState({
+        studentId: null,
+        fullName: "",
+        weight: "",
+        height: "",
+        fallbackStatus: "normal",
+    });
+    const [isSavingTargetedMeasurement, setIsSavingTargetedMeasurement] = useState(false);
     const [sortColumn, setSortColumn] = useState("name");
     const [sortDirection, setSortDirection] = useState("asc");
 
-    // Mock BMI history
-    const bmiHistory = [
-        { date: "Jan", bmi: 15.2, status: "underweight" },
-        { date: "Feb", bmi: 15.5, status: "underweight" },
-        { date: "Mar", bmi: 16.1, status: "normal" },
-        { date: "Apr", bmi: 16.8, status: "normal" },
-    ];
-
-    // Mock feeding records
-    const feedingRecords = [
-        {
-        date: "Jan 13, 2026",
-        session: 245,
-        status: "participated",
-        },
-        {
-        date: "Jan 12, 2026",
-        session: 244,
-        status: "participated",
-        },
-        {
-        date: "Jan 11, 2026",
-        session: 243,
-        status: "absent",
-        note: "Student was sick",
-        },
-        {
-        date: "Jan 10, 2026",
-        session: 242,
-        status: "participated",
-        },
-        {
-        date: "Jan 9, 2026",
-        session: 241,
-        status: "did-not-eat",
-        note: "Not feeling well",
-        },
-    ];
     const [students, setStudents] = useState([]);
     const [rawStudents, setRawStudents] = useState([])
     const [formData, setFormData] = useState({
@@ -411,6 +419,12 @@ function Students() {
     const [isSavingMeasurements, setIsSavingMeasurements] = useState(false);
     const [isUpdatingStudent, setIsUpdatingStudent] = useState(false);
     const [editingStudentMeta, setEditingStudentMeta] = useState(null);
+    const selectedStudentAttendance = selectedStudent
+        ? (studentAttendanceCache[selectedStudent.id] || [])
+        : [];
+    const isSelectedStudentAttendanceLoading = selectedStudent
+        ? Boolean(studentAttendanceLoadingIds[selectedStudent.id])
+        : false;
 
     const formatGradeLabel = (value) => {
         const text = String(value ?? "").trim();
@@ -587,6 +601,40 @@ function Students() {
         ? sections.filter((section) => isSameGrade(section.grade, formData.grade))
         : [];
 
+    const sectionStudentCountMap = useMemo(() => {
+        const byId = new Map();
+        const byName = new Map();
+
+        students.forEach((student) => {
+            const sectionId = String(student?.sectionId ?? "").trim();
+            const sectionName = String(student?.section ?? "").trim().toLowerCase();
+
+            if (sectionId) {
+                byId.set(sectionId, (byId.get(sectionId) || 0) + 1);
+            }
+
+            if (sectionName) {
+                byName.set(sectionName, (byName.get(sectionName) || 0) + 1);
+            }
+        });
+
+        return { byId, byName };
+    }, [students]);
+
+    const getSectionStudentCount = (section) => {
+        const sectionId = String(section?.id ?? "").trim();
+        if (sectionId && sectionStudentCountMap.byId.has(sectionId)) {
+            return sectionStudentCountMap.byId.get(sectionId);
+        }
+
+        const sectionName = String(section?.name ?? "").trim().toLowerCase();
+        if (sectionName && sectionStudentCountMap.byName.has(sectionName)) {
+            return sectionStudentCountMap.byName.get(sectionName);
+        }
+
+        return 0;
+    };
+
     useEffect(() => {
         if (!user?.id) {
             return;
@@ -664,7 +712,7 @@ function Students() {
                 : Array.isArray(data.result)
                     ? data.result
                     : [];
-            // console.log(rawStudents)
+            console.log(rawStudents)
             setRawStudents(rawStudents)
             const normalizedStudents = Array.isArray(rawStudents)
                 ? rawStudents.map(normalizeStudent)
@@ -751,6 +799,7 @@ function Students() {
         day: "numeric",
         year: "numeric",
     });
+    const targetedMeasurementDateLabel = measurementDateLabel;
 
     const measurementSection = measurementActiveSectionId
         ? sections.find((section) => section.id === measurementActiveSectionId) || null
@@ -763,17 +812,6 @@ function Students() {
             return matchesId || matchesName;
         })
         : [];
-
-    const getSectionStudentCount = (section) => {
-        if (!section) {
-            return 0;
-        }
-        return students.filter((student) => {
-            const matchesId = student.sectionId && student.sectionId === section.id;
-            const matchesName = section.name && student.section === section.name;
-            return matchesId || matchesName;
-        }).length;
-    };
 
     useEffect(() => {
         if (!measurementOpen) {
@@ -852,6 +890,129 @@ function Students() {
         return "overweight";
     };
 
+    const targetedMeasurementBMI = getMeasurementBMI(
+        targetedMeasurementForm.weight,
+        targetedMeasurementForm.height
+    );
+    const targetedMeasurementStatus =
+        getBMIStatusFromValue(targetedMeasurementBMI) ||
+        targetedMeasurementForm.fallbackStatus ||
+        "normal";
+
+    const openTargetedMeasurementModal = () => {
+        if (!selectedStudent) {
+            return;
+        }
+
+        setTargetedMeasurementForm({
+            studentId: selectedStudent.id,
+            fullName: selectedStudent.name || "",
+            weight: selectedStudent.weight ?? "",
+            height: selectedStudent.height ?? "",
+            fallbackStatus: selectedStudent.bmiStatus || "normal",
+        });
+        setTargetedMeasurementOpen(true);
+        setSelectedStudent(null);
+    };
+
+    const closeTargetedMeasurementModal = () => {
+        setTargetedMeasurementOpen(false);
+        setTargetedMeasurementForm({
+            studentId: null,
+            fullName: "",
+            weight: "",
+            height: "",
+            fallbackStatus: "normal",
+        });
+    };
+
+    const handleTargetedMeasurementChange = (field, value) => {
+        setTargetedMeasurementForm((prev) => ({
+            ...prev,
+            [field]: value,
+        }));
+    };
+
+    const handleSaveTargetedMeasurement = () => {
+        if (isSavingTargetedMeasurement) {
+            return;
+        }
+
+        if (!user?.id || !targetedMeasurementForm.studentId) {
+            alert("Missing user or student details. Please try again.");
+            return;
+        }
+
+        const weightValue = parseMeasurementValue(targetedMeasurementForm.weight);
+        const heightValue = parseMeasurementValue(targetedMeasurementForm.height);
+
+        if (!weightValue || !heightValue) {
+            alert("Please provide valid weight and height values.");
+            return;
+        }
+
+        const bmiValue = getMeasurementBMI(weightValue, heightValue);
+        if (bmiValue == null) {
+            alert("Unable to calculate BMI. Please check the measurements.");
+            return;
+        }
+
+        const payload = {
+            userId: user.id,
+            studentId: targetedMeasurementForm.studentId,
+            weight: weightValue,
+            height: heightValue,
+            bmi: Number(bmiValue.toFixed(1)),
+            bmiStatus: getBMIStatusFromValue(bmiValue) || "normal",
+        };
+
+        setIsSavingTargetedMeasurement(true);
+        axios
+            .post("/api/update_student_measurement_targeted", payload)
+            .then((response) => {
+                if (!response.data?.status) {
+                    alert("Something went wrong. Try again later!");
+                    return;
+                }
+
+                return axios
+                    .get("/api/get_all_students", {
+                        params: {
+                            userId: user.id,
+                        },
+                    })
+                    .then((fetchResponse) => {
+                        const data = fetchResponse.data;
+                        if (!data?.status) {
+                            alert("Measurement updated, but list refresh failed. Please reload.");
+                            return;
+                        }
+
+                        const fetchedRawStudents = Array.isArray(data.students)
+                            ? data.students
+                            : Array.isArray(data.result)
+                                ? data.result
+                                : [];
+
+                        setRawStudents(fetchedRawStudents);
+                        const normalizedStudents = fetchedRawStudents.map(normalizeStudent);
+                        setStudents(normalizedStudents);
+
+                        setToastMessage("Student measurement updated successfully!");
+                        setShowToast(true);
+                        setTimeout(() => setShowToast(false), 3000);
+                        closeTargetedMeasurementModal();
+                    });
+            })
+            .catch((error) => {
+                console.error("Saving targeted measurement error:", error);
+                alert("An error occurred while updating student measurement.");
+            })
+            .finally(() => {
+                setIsSavingTargetedMeasurement(false);
+            });
+    };
+
     const openMeasurementModal = () => {
         const fallbackSectionId = activeSection?.id || sections[0]?.id || null;
         setMeasurementActiveSectionId(fallbackSectionId);
@@ -861,6 +1022,18 @@ function Students() {
     const closeMeasurementModal = () => {
         setMeasurementOpen(false);
     };
+
+    useEffect(() => {
+        if (!location.state?.openMeasurementModal) {
+            return;
+        }
+
+        const fallbackSectionId = activeSection?.id || sections[0]?.id || null;
+        setMeasurementActiveSectionId(fallbackSectionId);
+        setMeasurementOpen(true);
+
+        navigate(location.pathname, { replace: true, state: {} });
+    }, [location.pathname, location.state, navigate, activeSection, sections]);
 
     const handleMeasurementChange = (studentId, field, value) => {
         setMeasurementDrafts((prev) => ({
@@ -949,10 +1122,415 @@ function Students() {
         }
     };
 
+    const formatAttendanceDateLabel = (value) => {
+        if (!value) {
+            return "-";
+        }
+        const raw = String(value).trim();
+        if (!raw) {
+            return "-";
+        }
+        const parsed = new Date(raw);
+        if (Number.isNaN(parsed.getTime())) {
+            return raw;
+        }
+        const hasTimezone = /(gmt|utc|z|[+-]\d{2}:?\d{2})$/i.test(raw);
+        return parsed.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            ...(hasTimezone ? { timeZone: "UTC" } : {}),
+        });
+    };
+
+    const truncateRemarks = (value, maxLength = 25) => {
+        const text = String(value || "").trim();
+        if (!text) {
+            return { display: "-", full: "" };
+        }
+        if (text.length <= maxLength) {
+            return { display: text, full: text };
+        }
+        return {
+            display: `${text.slice(0, maxLength)}...`,
+            full: text,
+        };
+    };
+
+    const selectedStudentParticipationRows = selectedStudentAttendance.map((record, index) => {
+        let sessionId = "";
+        let present = 0;
+        let remarks = "";
+        let createdAt = "";
+
+        if (Array.isArray(record)) {
+            sessionId = record[1] ?? "";
+            present = Number(record[3] ?? 0);
+            remarks = record[4] ?? "";
+            createdAt = record[5] ?? "";
+        } else if (record && typeof record === "object") {
+            sessionId = record.session_id ?? record.sessionId ?? "";
+            present = Number(record.present ?? 0);
+            remarks = record.remarks ?? "";
+            createdAt = record.created_at ?? record.createdAt ?? "";
+        }
+
+        const status = present === 1 ? "participated" : "absent";
+        const note = truncateRemarks(remarks, 25);
+
+        return {
+            id: `${sessionId}_${createdAt}_${index}`,
+            dateLabel: formatAttendanceDateLabel(createdAt),
+            sessionLabel: sessionId ? `#${sessionId}` : "-",
+            status,
+            notesDisplay: note.display,
+            notesFull: note.full,
+        };
+    });
+
+    const parseHistoryArray = (value) => {
+        if (Array.isArray(value)) {
+            return value;
+        }
+        if (value == null) {
+            return [];
+        }
+        const raw = String(value).trim();
+        if (!raw) {
+            return [];
+        }
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [parsed];
+        } catch (error) {
+            return [raw];
+        }
+    };
+
+    const normalizeTimelineStatus = (value) => {
+        const text = String(value ?? "").trim().replace(/^"+|"+$/g, "").toLowerCase();
+        if (text === "normal" || text === "underweight" || text === "overweight") {
+            return text;
+        }
+        return null;
+    };
+
+    const formatTimelineDateLabel = (value) => {
+        if (!value) {
+            return "-";
+        }
+        const raw = String(value).trim();
+        if (!raw) {
+            return "-";
+        }
+        const parsed = new Date(raw);
+        if (Number.isNaN(parsed.getTime())) {
+            return raw;
+        }
+        const hasTimezone = /(gmt|utc|z|[+-]\d{2}:?\d{2})$/i.test(raw);
+        return parsed.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            ...(hasTimezone ? { timeZone: "UTC" } : {}),
+        });
+    };
+
+    const selectedStudentTimeline = useMemo(() => {
+        if (!selectedStudent) {
+            return [];
+        }
+
+        const selectedId = Number(selectedStudent.id);
+        const rawStudentRecord = rawStudents.find((student) => {
+            if (Array.isArray(student)) {
+                return Number(student[0]) === selectedId;
+            }
+            if (!student || typeof student !== "object") {
+                return false;
+            }
+            return Number(student.student_id ?? student.id) === selectedId;
+        });
+
+        if (!rawStudentRecord) {
+            return [];
+        }
+
+        const bmiRaw = Array.isArray(rawStudentRecord)
+            ? rawStudentRecord[10]
+            : (rawStudentRecord.bmi ?? []);
+        const statusRaw = Array.isArray(rawStudentRecord)
+            ? rawStudentRecord[11]
+            : (rawStudentRecord.bmi_measurement ?? rawStudentRecord.bmiStatus ?? []);
+        const dateRaw = Array.isArray(rawStudentRecord)
+            ? rawStudentRecord[12]
+            : (rawStudentRecord.measurement_date ?? rawStudentRecord.measurementDate ?? []);
+
+        const bmiValues = parseHistoryArray(bmiRaw);
+        const statusValues = parseHistoryArray(statusRaw);
+        const dateValues = parseHistoryArray(dateRaw);
+        const total = Math.max(bmiValues.length, statusValues.length, dateValues.length);
+
+        const timeline = [];
+        for (let index = 0; index < total; index += 1) {
+            const bmiValue = Number(bmiValues[index]);
+            if (Number.isNaN(bmiValue)) {
+                continue;
+            }
+
+            const statusFromHistory = normalizeTimelineStatus(statusValues[index]);
+            const status = statusFromHistory || getBMIStatusFromValue(bmiValue) || "normal";
+
+            timeline.push({
+                key: `${selectedStudent.id}_${index}`,
+                bmi: Number(bmiValue.toFixed(1)),
+                status,
+                date: formatTimelineDateLabel(dateValues[index]),
+            });
+        }
+
+        return timeline.slice(-4);
+    }, [selectedStudent, rawStudents]);
+
     // Calculate BMI timeline bar heights (percentage of max height)
-    const maxBMI = Math.max(...bmiHistory.map((h) => h.bmi));
-    const minBMI = Math.min(...bmiHistory.map((h) => h.bmi));
+    const timelineBMIValues = selectedStudentTimeline.map((entry) => entry.bmi);
+    const maxBMI = timelineBMIValues.length ? Math.max(...timelineBMIValues) : 1;
+    const minBMI = timelineBMIValues.length ? Math.min(...timelineBMIValues) : 0;
     const bmiRange = maxBMI - minBMI || 1;
+
+    const bmiTrendSummary = useMemo(() => {
+        const fallbackTrend = {
+            title: "No Trend Yet",
+            subtext: "Add another measurement to see progress",
+            delta: "—",
+            icon: "dash",
+            tone: "neutral",
+        };
+
+        const lastEntry = selectedStudentTimeline[selectedStudentTimeline.length - 1] || null;
+        const prevEntry =
+            selectedStudentTimeline.length > 1
+                ? selectedStudentTimeline[selectedStudentTimeline.length - 2]
+                : null;
+
+        const toBmiNumber = (value) => {
+            const parsed = Number(value);
+            if (Number.isNaN(parsed)) {
+                return null;
+            }
+            return Number(parsed.toFixed(1));
+        };
+
+        const currentBmi = toBmiNumber(lastEntry?.bmi);
+        const previousBmi = toBmiNumber(prevEntry?.bmi);
+        const currentStatus =
+            normalizeTimelineStatus(lastEntry?.status) || getBMIStatusFromValue(currentBmi);
+        const previousStatus =
+            normalizeTimelineStatus(prevEntry?.status) || getBMIStatusFromValue(previousBmi);
+
+        const formatDelta = (deltaValue, isStableChange = false) => {
+            if (!Number.isFinite(deltaValue)) {
+                return "—";
+            }
+            if (isStableChange) {
+                return "No change";
+            }
+            const rounded = Number(deltaValue.toFixed(1));
+            if (rounded === 0) {
+                return "No change";
+            }
+            const sign = rounded > 0 ? "+" : "";
+            return `${sign}${rounded.toFixed(1)} BMI`;
+        };
+
+        if (currentBmi == null) {
+            return {
+                currentBmi: null,
+                previousBmi: null,
+                currentStatus: null,
+                previousStatus: null,
+                trend: fallbackTrend,
+            };
+        }
+
+        if (previousBmi == null || !previousStatus || !currentStatus) {
+            return {
+                currentBmi,
+                previousBmi,
+                currentStatus,
+                previousStatus,
+                trend: fallbackTrend,
+            };
+        }
+
+        const delta = currentBmi - previousBmi;
+        const isCategoryChanged = currentStatus !== previousStatus;
+        const isStableChange = Math.abs(delta) < 0.2 && !isCategoryChanged;
+
+        let trend = fallbackTrend;
+
+        if (
+            previousStatus === "normal" &&
+            currentStatus === "normal" &&
+            currentBmi <= 19.0
+        ) {
+            trend = {
+                title: "Monitor",
+                subtext: "Approaching underweight boundary",
+                delta: formatDelta(delta, isStableChange),
+                icon: "warning",
+                tone: "warning",
+            };
+        } else if (previousStatus === "underweight" && currentStatus === "underweight") {
+            if (isStableChange) {
+                trend = {
+                    title: "Stable",
+                    subtext: "No significant change",
+                    delta: "No change",
+                    icon: "dash",
+                    tone: "neutral",
+                };
+            } else if (delta > 0) {
+                trend = {
+                    title: "Improving",
+                    subtext: "Moving toward normal range",
+                    delta: formatDelta(delta),
+                    icon: "arrowUp",
+                    tone: "positive",
+                };
+            } else {
+                trend = {
+                    title: "Declining",
+                    subtext: "Moving further below normal range",
+                    delta: formatDelta(delta),
+                    icon: "arrowDown",
+                    tone: "danger",
+                };
+            }
+        } else if (previousStatus === "normal" && currentStatus === "normal") {
+            trend = {
+                title: "Stable",
+                subtext: "Maintaining healthy range",
+                delta: formatDelta(delta, isStableChange),
+                icon: "dash",
+                tone: "neutral",
+            };
+        } else if (previousStatus === "underweight" && currentStatus === "normal") {
+            trend = {
+                title: "Improved to Normal",
+                subtext: "Reached healthy range",
+                delta: formatDelta(delta),
+                icon: "arrowUp",
+                tone: "positive",
+            };
+        } else if (previousStatus === "normal" && currentStatus === "underweight") {
+            trend = {
+                title: "At Risk",
+                subtext: "Dropped below healthy range",
+                delta: formatDelta(delta),
+                icon: "arrowDown",
+                tone: "danger",
+            };
+        } else if (previousStatus === "overweight" && currentStatus === "normal") {
+            trend = {
+                title: "Improved to Normal",
+                subtext: "Returned to healthy range",
+                delta: formatDelta(delta),
+                icon: "arrowDown",
+                tone: "positive",
+            };
+        } else if (previousStatus === "normal" && currentStatus === "overweight") {
+            trend = {
+                title: "At Risk",
+                subtext: "Above healthy range",
+                delta: formatDelta(delta),
+                icon: "arrowUp",
+                tone: "danger",
+            };
+        } else if (previousStatus === "overweight" && currentStatus === "overweight") {
+            if (isStableChange) {
+                trend = {
+                    title: "Stable",
+                    subtext: "No significant change",
+                    delta: "No change",
+                    icon: "dash",
+                    tone: "neutral",
+                };
+            } else if (delta < 0) {
+                trend = {
+                    title: "Improving",
+                    subtext: "Moving toward healthy range",
+                    delta: formatDelta(delta),
+                    icon: "arrowDown",
+                    tone: "positive",
+                };
+            } else {
+                trend = {
+                    title: "Declining",
+                    subtext: "Moving further above healthy range",
+                    delta: formatDelta(delta),
+                    icon: "arrowUp",
+                    tone: "danger",
+                };
+            }
+        }
+
+        return {
+            currentBmi,
+            previousBmi,
+            currentStatus,
+            previousStatus,
+            trend,
+        };
+    }, [selectedStudentTimeline]);
+
+    const renderTrendIcon = (icon) => {
+        if (icon === "arrowUp") {
+            return (
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 12l7-7m0 0l7 7m-7-7v14"
+                    />
+                </svg>
+            );
+        }
+        if (icon === "arrowDown") {
+            return (
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 12l-7 7m0 0l-7-7m7 7V5"
+                    />
+                </svg>
+            );
+        }
+        if (icon === "warning") {
+            return (
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 9v4m0 4h.01M10.29 3.86l-7.15 12.4A2 2 0 004.86 19h14.28a2 2 0 001.72-2.74l-7.15-12.4a2 2 0 00-3.44 0z"
+                    />
+                </svg>
+            );
+        }
+        return (
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 12h14"
+                />
+            </svg>
+        );
+    };
 
 
     // Form validation
@@ -1053,12 +1631,13 @@ function Students() {
         const bmi = parseFloat((weightInKg / (heightInMeters * heightInMeters)).toFixed(1));
         
         // Determine BMI status
-        let bmiStatus = "normal";
-        if (bmi < 16) {
-        bmiStatus = "underweight";
-        } else if (bmi > 23) {
-        bmiStatus = "overweight";
-        }
+        let bmiStatus = getBMIStatusFromValue(bmi)
+        // let bmiStatus = "normal";
+        // if (bmi < 16) {
+        // bmiStatus = "underweight";
+        // } else if (bmi > 23) {
+        // bmiStatus = "overweight";
+        // }
         
         const studentName = `${formData.firstName} ${formData.lastName}`;
         
@@ -1241,6 +1820,65 @@ function Students() {
         handleClear();
     };
 
+    const fetchStudentAttendance = (studentId) => {
+        if (!studentId) {
+            return;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(studentAttendanceCache, studentId)) {
+            console.log("Student attendance (cached):", studentAttendanceCache[studentId]);
+            return;
+        }
+
+        if (studentAttendanceLoadingIds[studentId]) {
+            return;
+        }
+
+        setStudentAttendanceLoadingIds((prev) => ({
+            ...prev,
+            [studentId]: true,
+        }));
+
+        axios
+            .get("/api/get_student_attendance", {
+                params: {
+                    studentId: studentId,
+                },
+            })
+            .then((response) => {
+                const data = response.data;
+                if (!data?.status) {
+                    console.warn("Student attendance fetch failed:", data);
+                    return;
+                }
+
+                const attendance = Array.isArray(data.studentsAttendance)
+                    ? data.studentsAttendance
+                    : [];
+
+                setStudentAttendanceCache((prev) => ({
+                    ...prev,
+                    [studentId]: attendance,
+                }));
+                console.log("Student attendance (fetched):", attendance);
+            })
+            .catch((error) => {
+                console.error("Fetching student attendance error:", error);
+            })
+            .finally(() => {
+                setStudentAttendanceLoadingIds((prev) => {
+                    const next = { ...prev };
+                    delete next[studentId];
+                    return next;
+                });
+            });
+    };
+
+    const openStudentProfileModal = (student) => {
+        setSelectedStudent(student);
+        fetchStudentAttendance(student?.id);
+    };
+
     const handleDeleteStudent = () => {
         if (!selectedStudent) {
             return;
@@ -1274,6 +1912,11 @@ function Students() {
             }
 
             setStudents((prev) => prev.filter((stu) => stu.id !== selectedStudent.id));
+            setStudentAttendanceCache((prev) => {
+                const next = { ...prev };
+                delete next[selectedStudent.id];
+                return next;
+            });
             setSelectedStudent(null);
             setToastMessage("Student deleted successfully!");
             setShowToast(true);
@@ -1337,12 +1980,15 @@ function Students() {
         navigate("/");
     };
 
-    if (user == null) {
+    if (checkingAuth) {
         return (
             <div className='comp-loading'>
                 <Loading />
             </div>
         )
+    }
+    if (user == null) {
+        return null;
     }
 
     return (
@@ -1553,39 +2199,46 @@ function Students() {
                                 </svg>
                                 <h3 className="section-name">Create new section</h3>
                             </div>
-                        {sections.map(section => (
-                            <div
-                            key={section.id}
-                            className={`section-card ${
-                                activeSection && activeSection.id === section.id ? "active" : ""
-                            }`}
-                            onClick={() => handleSectionCardClick(section)}
-                            >
-                            <button
-                                className="section-edit-icon"
-                                onClick={(e) => handleEditIconClick(e, section)}
-                                title="Edit section"
-                            >
-                                <svg
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
+                        {sections.map((section) => {
+                            const studentCount = getSectionStudentCount(section);
+
+                            return (
+                                <div
+                                key={section.id}
+                                className={`section-card ${
+                                    activeSection && activeSection.id === section.id ? "active" : ""
+                                }`}
+                                onClick={() => handleSectionCardClick(section)}
                                 >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                                />
-                                </svg>
-                            </button>
-                            <div className="section-card-content">
-                                <h3 className="section-name">{section.name}</h3>
-                                <p className="section-grade">{section.grade}</p>
-                                <p className="section-created">Created: {section.createdAt}</p>
-                            </div>
-                            </div>
-                        ))}
+                                <button
+                                    className="section-edit-icon"
+                                    onClick={(e) => handleEditIconClick(e, section)}
+                                    title="Edit section"
+                                >
+                                    <svg
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                    >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                    />
+                                    </svg>
+                                </button>
+                                <div className="section-card-content">
+                                    <h3 className="section-name">{section.name}</h3>
+                                    <p className="section-grade">{section.grade}</p>
+                                    <p className="section-total">
+                                        {studentCount} {studentCount === 1 ? "student" : "students"}
+                                    </p>
+                                    <p className="section-created">Created: {section.createdAt}</p>
+                                </div>
+                                </div>
+                            );
+                        })}
                         </div>
                     </div>
 
@@ -1823,7 +2476,7 @@ function Students() {
                             {filteredStudents.map((student) => (
                                 <tr
                                 key={student.id}
-                                onClick={() => setSelectedStudent(student)}
+                                onClick={() => openStudentProfileModal(student)}
                                 >
                                 <td className="students-table-name">{student.name}</td>
                                 <td>{student.age}</td>
@@ -2073,12 +2726,117 @@ function Students() {
                 </div>
             )}
 
+            {/* Targeted Measurement Modal */}
+            {targetedMeasurementOpen && (
+                <div
+                    className="students-modal-overlay"
+                    onClick={closeTargetedMeasurementModal}
+                >
+                    <div
+                        className="students-modal students-targeted-measurement-modal"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="students-modal-header">
+                            <div className="students-modal-title">
+                                <div className="students-modal-title-text">
+                                    <h2>Update Student Measurement</h2>
+                                    <p>Updated: {targetedMeasurementDateLabel}</p>
+                                </div>
+                            </div>
+                            <button
+                                className="students-modal-close"
+                                onClick={closeTargetedMeasurementModal}
+                                type="button"
+                                aria-label="Close targeted measurement"
+                            >
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M6 18L18 6M6 6l12 12"
+                                    />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="students-modal-content">
+                            <div className="students-targeted-measurement-grid">
+                                <div className="students-form-field">
+                                    <label className="students-form-label">Full Name</label>
+                                    <input
+                                        type="text"
+                                        className="students-form-input students-targeted-readonly"
+                                        value={targetedMeasurementForm.fullName}
+                                        disabled
+                                    />
+                                </div>
+
+                                <div className="students-form-field">
+                                    <label className="students-form-label required">Weight (kg)</label>
+                                    <input
+                                        type="number"
+                                        className="students-form-input"
+                                        value={targetedMeasurementForm.weight}
+                                        min="1"
+                                        step="0.1"
+                                        placeholder="0"
+                                        onChange={(e) => handleTargetedMeasurementChange("weight", e.target.value)}
+                                    />
+                                </div>
+
+                                <div className="students-form-field">
+                                    <label className="students-form-label required">Height (cm)</label>
+                                    <input
+                                        type="number"
+                                        className="students-form-input"
+                                        value={targetedMeasurementForm.height}
+                                        min="1"
+                                        step="0.1"
+                                        placeholder="0"
+                                        onChange={(e) => handleTargetedMeasurementChange("height", e.target.value)}
+                                    />
+                                </div>
+
+                                <div className="students-targeted-status-row">
+                                    <span className={`students-bmi-status ${targetedMeasurementStatus}`}>
+                                        {getBMIStatusLabel(targetedMeasurementStatus)}
+                                    </span>
+                                    <span className="students-targeted-bmi-value">
+                                        BMI: {targetedMeasurementBMI != null ? targetedMeasurementBMI.toFixed(1) : "-"}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="students-modal-actions">
+                            <button
+                                className="students-action-btn secondary"
+                                type="button"
+                                onClick={closeTargetedMeasurementModal}
+                            >
+                                Close
+                            </button>
+                            <button
+                                className="students-action-btn primary"
+                                type="button"
+                                onClick={handleSaveTargetedMeasurement}
+                                disabled={isSavingTargetedMeasurement}
+                            >
+                                {isSavingTargetedMeasurement ? "Saving..." : "Save Update"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Student Profile Modal */}
             {selectedStudent && (
                 <div
                 className="students-modal-overlay"
                 onClick={() => setSelectedStudent(null)}
                 >
+                    {console.log(selectedStudent)}
                 <div
                     className="students-modal"
                     onClick={(e) => e.stopPropagation()}
@@ -2151,49 +2909,45 @@ function Students() {
                         <div className="students-bmi-summary">
                         <div className="students-bmi-card">
                             <label>Current BMI</label>
-                            <div className="value">{selectedStudent.bmi}</div>
+                            <div className="value">
+                                {bmiTrendSummary.currentBmi != null
+                                    ? bmiTrendSummary.currentBmi.toFixed(1)
+                                    : "—"}
+                            </div>
                             <span
-                            className={`students-bmi-status ${selectedStudent.bmiStatus}`}
+                            className={`students-bmi-status ${bmiTrendSummary.currentStatus || "no-data"}`}
                             >
-                            {getBMIStatusLabel(selectedStudent.bmiStatus)}
+                            {bmiTrendSummary.currentStatus
+                                ? getBMIStatusLabel(bmiTrendSummary.currentStatus)
+                                : "No data"}
                             </span>
                         </div>
                         <div className="students-bmi-card">
                             <label>Previous BMI</label>
-                            <div className="value">16.1</div>
-                            <div className="change positive">
-                            <svg
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                            >
-                                <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M5 10l7-7m0 0l7 7m-7-7v18"
-                                />
-                            </svg>
-                            +0.7 Improved
+                            <div className="value">
+                                {bmiTrendSummary.previousBmi != null
+                                    ? bmiTrendSummary.previousBmi.toFixed(1)
+                                    : "—"}
                             </div>
-                        </div>
-                        <div className="students-bmi-card">
-                            <label>Trend</label>
-                            <div className="value">Improving</div>
-                            <div className="change positive">
-                            <svg
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
+                            <span
+                                className={`students-bmi-status ${bmiTrendSummary.previousStatus || "no-data"}`}
                             >
-                                <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-                                />
-                            </svg>
-                            Positive
+                                {bmiTrendSummary.previousStatus
+                                    ? getBMIStatusLabel(bmiTrendSummary.previousStatus)
+                                    : "No previous measurement"}
+                            </span>
+                        </div>
+                        <div
+                            className={`students-bmi-card students-bmi-trend-card tone-${bmiTrendSummary.trend.tone}`}
+                        >
+                            <label>Trend</label>
+                            <div className="value">{bmiTrendSummary.trend.title}</div>
+                            <div className="students-bmi-trend-subtext">
+                                {bmiTrendSummary.trend.subtext}
+                            </div>
+                            <div className={`students-bmi-trend-delta ${bmiTrendSummary.trend.tone}`}>
+                                {renderTrendIcon(bmiTrendSummary.trend.icon)}
+                                <span>{bmiTrendSummary.trend.delta}</span>
                             </div>
                         </div>
                         </div>
@@ -2201,29 +2955,34 @@ function Students() {
                         {/* BMI Timeline */}
                         <div className="students-bmi-timeline">
                         <div className="students-timeline-bars">
-                            {bmiHistory.map((record, index) => {
-                            const heightPercent =
-                                ((record.bmi - minBMI) / bmiRange) * 100;
-                            return (
-                                <div
-                                key={index}
-                                className="students-timeline-bar-wrapper"
-                                >
-                                <div className="students-timeline-value">
-                                    {record.bmi}
+                            {selectedStudentTimeline.length ? (
+                                selectedStudentTimeline.map((record) => {
+                                    const heightPercent = ((record.bmi - minBMI) / bmiRange) * 100;
+                                    return (
+                                        <div
+                                            key={record.key}
+                                            className="students-timeline-bar-wrapper"
+                                        >
+                                            <div className="students-timeline-value">
+                                                {record.bmi}
+                                            </div>
+                                            <div
+                                                className={`students-timeline-bar ${record.status}`}
+                                                style={{
+                                                    height: `${Math.max(heightPercent, 20)}%`,
+                                                }}
+                                            ></div>
+                                            <div className="students-timeline-label">
+                                                {record.date}
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            ) : (
+                                <div className="students-timeline-empty">
+                                    No measurement history yet.
                                 </div>
-                                <div
-                                    className={`students-timeline-bar ${record.status}`}
-                                    style={{
-                                    height: `${Math.max(heightPercent, 20)}%`,
-                                    }}
-                                ></div>
-                                <div className="students-timeline-label">
-                                    {record.date}
-                                </div>
-                                </div>
-                            );
-                            })}
+                            )}
                         </div>
                         </div>
                     </div>
@@ -2243,48 +3002,64 @@ function Students() {
                             </tr>
                         </thead>
                         <tbody>
-                            {feedingRecords.map((record, index) => (
-                            <tr key={index}>
-                                <td>{record.date}</td>
-                                <td>#{record.session}</td>
-                                <td>
-                                <span
-                                    className={`students-participation-badge ${record.status}`}
-                                >
-                                    {record.status === "participated" && (
-                                    <svg
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                    >
-                                        <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M5 13l4 4L19 7"
-                                        />
-                                    </svg>
-                                    )}
-                                    {record.status === "absent" && (
-                                    <svg
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                    >
-                                        <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M6 18L18 6M6 6l12 12"
-                                        />
-                                    </svg>
-                                    )}
-                                    {getParticipationLabel(record.status)}
-                                </span>
-                                </td>
-                                <td>{record.note || "-"}</td>
-                            </tr>
-                            ))}
+                            {isSelectedStudentAttendanceLoading ? (
+                                Array.from({ length: 3 }).map((_, index) => (
+                                    <tr key={`attendance-skeleton-${index}`}>
+                                        <td colSpan={4}>
+                                            <div className="students-participation-skeleton-line" />
+                                        </td>
+                                    </tr>
+                                ))
+                            ) : selectedStudentParticipationRows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={4} className="students-participation-empty">
+                                        No attendance records found.
+                                    </td>
+                                </tr>
+                            ) : (
+                                selectedStudentParticipationRows.map((record) => (
+                                    <tr key={record.id}>
+                                        <td>{record.dateLabel}</td>
+                                        <td>{record.sessionLabel}</td>
+                                        <td>
+                                            <span
+                                                className={`students-participation-badge ${record.status}`}
+                                            >
+                                                {record.status === "participated" && (
+                                                    <svg
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        viewBox="0 0 24 24"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            strokeWidth={2}
+                                                            d="M5 13l4 4L19 7"
+                                                        />
+                                                    </svg>
+                                                )}
+                                                {record.status === "absent" && (
+                                                    <svg
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        viewBox="0 0 24 24"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            strokeWidth={2}
+                                                            d="M6 18L18 6M6 6l12 12"
+                                                        />
+                                                    </svg>
+                                                )}
+                                                {getParticipationLabel(record.status)}
+                                            </span>
+                                        </td>
+                                        <td title={record.notesFull || undefined}>{record.notesDisplay}</td>
+                                    </tr>
+                                ))
+                            )}
                         </tbody>
                         </table>
                     </div>
@@ -2324,7 +3099,11 @@ function Students() {
                     <button className="students-action-btn secondary" onClick={handleDeleteStudent}>
                         Delete Student
                     </button>
-                    <button className="students-action-btn primary">
+                    <button
+                        className="students-action-btn primary"
+                        type="button"
+                        onClick={openTargetedMeasurementModal}
+                    >
                         Update Measurement
                     </button>
                     </div>

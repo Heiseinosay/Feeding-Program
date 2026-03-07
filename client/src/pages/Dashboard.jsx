@@ -1,6 +1,7 @@
 // PACKAGES
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from "react-router";
+import axios from 'axios';
 import {
   BarChart,
   Bar,
@@ -28,6 +29,16 @@ function Dashboard() {
     const navigate = useNavigate()
     const [user, setUser] = useState(null);
     const [checkingAuth, setCheckingAuth] = useState(true);
+    const [studentsFetchDone, setStudentsFetchDone] = useState(false);
+    const [students, setStudents] = useState([]);
+    const [sections, setSections] = useState([]);
+    const [statusSummaryRows, setStatusSummaryRows] = useState([]);
+    const [nearestSessionStatus, setNearestSessionStatus] = useState({
+        kind: "empty",
+        title: "Empty",
+        description: "No upcoming feeding program",
+    });
+    const [totalCompletedSessions, setTotalCompletedSessions] = useState(0);
 
     // ** FETCH USER
     const handleMe = () => {
@@ -63,85 +74,446 @@ function Dashboard() {
         };
     }, [navigate]);
 
+    useEffect(() => {
+        if (!user?.id) {
+            return;
+        }
+
+        let isMounted = true;
+        setStudentsFetchDone(false);
+
+        axios
+            .get("/api/get_all_students", {
+                params: { userId: user.id },
+            })
+            .then((response) => {
+                const data = response.data;
+                if (!data?.status) {
+                    console.warn("Dashboard get_all_students failed:", data);
+                    return;
+                }
+
+                const students = Array.isArray(data.students) ? data.students : [];
+                setStudents(students)
+                console.log("Dashboard students:", students);
+            })
+            .catch((error) => {
+                console.error("Dashboard get_all_students error:", error);
+            })
+            .finally(() => {
+                if (!isMounted) {
+                    return;
+                }
+                setStudentsFetchDone(true);
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [user?.id]);
+
+    useEffect(() => {
+        if (!user?.id) {
+            return;
+        }
+
+        axios.get("/api/get_all_section", {
+            params: {
+                userId: user.id,
+            }
+        })
+        .then((response) => {
+            const data = response.data;
+            // console.log(data)
+            if (!data?.status) {
+                setSections([]);
+                return;
+            }
+
+            const fetchedSections = (data.sections || []).map((section) => ({
+                ...section,
+                createdAt: section.createdAt
+                    ? new Date(section.createdAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                    })
+                    : "",
+            }));
+
+            setSections(fetchedSections);
+            console.log("Sections: ", fetchedSections)
+        })
+        .catch((error) => {
+            console.error("Fetching sections error:", error);
+        });
+    }, [user?.id]);
+
+    useEffect(() => {
+        if (!user?.id) {
+            return;
+        }
+
+        axios
+            .get("/api/get_all_status_count", {
+                params: { userId: user.id },
+            })
+            .then((response) => {
+                const data = response.data;
+                if (!data?.status) {
+                    console.warn("Dashboard get_all_status_count failed:", data);
+                    setStatusSummaryRows([]);
+                    return;
+                }
+                const summaryRows = Array.isArray(data.Summary) ? data.Summary : [];
+                setStatusSummaryRows(summaryRows);
+                console.log("Dashboard status summary:", summaryRows);
+            })
+            .catch((error) => {
+                console.error("Dashboard get_all_status_count error:", error);
+                setStatusSummaryRows([]);
+            });
+    }, [user?.id]);
+
+    useEffect(() => {
+        const emptyState = {
+            kind: "empty",
+            title: "Empty",
+            description: "No upcoming feeding program",
+        };
+
+        if (!user?.id) {
+            setNearestSessionStatus(emptyState);
+            setTotalCompletedSessions(0);
+            return;
+        }
+
+        const toLocalDateOnly = (value) => {
+            const raw = String(value ?? "").trim();
+            if (!raw) {
+                return null;
+            }
+            if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+                const [year, month, day] = raw.split("-").map(Number);
+                return new Date(year, month - 1, day);
+            }
+            const parsed = new Date(raw);
+            if (Number.isNaN(parsed.getTime())) {
+                return null;
+            }
+            return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+        };
+
+        axios
+            .get("/api/get_nearest_upcoming_session", {
+                params: { userId: user.id },
+            })
+            .then((response) => {
+                const data = response.data;
+                if (!data?.status) {
+                    setNearestSessionStatus(emptyState);
+                    setTotalCompletedSessions(0);
+                    return;
+                }
+
+                const totalCompleted = Number(data.totalCompleted ?? 0);
+                setTotalCompletedSessions(Number.isNaN(totalCompleted) ? 0 : totalCompleted);
+
+                const nearestSession = data.nearestSession || (Array.isArray(data.sessions) ? data.sessions[0] : null);
+                if (!nearestSession) {
+                    setNearestSessionStatus(emptyState);
+                    return;
+                }
+
+                const sessionDateRaw = Array.isArray(nearestSession)
+                    ? nearestSession[1]
+                    : nearestSession?.session_date ?? nearestSession?.sessionDate;
+                const sessionDate = toLocalDateOnly(sessionDateRaw);
+
+                if (!sessionDate) {
+                    setNearestSessionStatus(emptyState);
+                    return;
+                }
+
+                const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const dayMs = 1000 * 60 * 60 * 24;
+                const daysUntil = Math.round((sessionDate.getTime() - today.getTime()) / dayMs);
+
+                if (daysUntil <= 0) {
+                    setNearestSessionStatus({
+                        kind: "today",
+                        title: "Today",
+                        description: "Feeding program is scheduled today",
+                    });
+                    return;
+                }
+
+                setNearestSessionStatus({
+                    kind: "upcoming",
+                    title: "Upcoming",
+                    description: `${daysUntil} day${daysUntil === 1 ? "" : "s"} before nearest feeding program`,
+                });
+            })
+            .catch((error) => {
+                console.error("Dashboard get_nearest_upcoming_session error:", error);
+                setNearestSessionStatus(emptyState);
+                setTotalCompletedSessions(0);
+            });
+    }, [user?.id]);
 
 
 
-    const [selectedSection, setSelectedSection] = useState("Section A");
+
+    const [selectedSection, setSelectedSection] = useState("all");
     const teacherName = user?.first_name
         ? `${user.first_name} ${user.last_name}`
         : "Teacher";
+    const selectedSectionLabel =
+        selectedSection === "all"
+            ? "All Sections"
+            : (sections.find((section) => section.id === selectedSection)?.name || "All Sections");
 
-    // Mock data for BMI distribution trend
-    const bmiData = [
-        {
-        week: "Week 1",
-        underweight: 8,
-        normal: 35,
-        overweight: 5,
-        },
-        {
-        week: "Week 2",
-        underweight: 7,
-        normal: 36,
-        overweight: 5,
-        },
-        {
-        week: "Week 3",
-        underweight: 6,
-        normal: 38,
-        overweight: 4,
-        },
-        {
-        week: "Week 4",
-        underweight: 5,
-        normal: 40,
-        overweight: 3,
-        },
-    ];
+    const getLatestBmiStatus = (value) => {
+        let parsed = value;
 
-    // Mock data for recent updates
-    const recentUpdates = [
-        {
-        id: 1,
-        name: "Maria Santos",
-        oldBMI: 15.2,
-        newBMI: 16.1,
-        status: "improved",
-        date: "2 hours ago",
-        },
-        {
-        id: 2,
-        name: "Juan Dela Cruz",
-        oldBMI: 18.5,
-        newBMI: 18.8,
-        status: "improved",
-        date: "5 hours ago",
-        },
-        {
-        id: 3,
-        name: "Ana Reyes",
-        oldBMI: 17.2,
-        newBMI: 17.2,
-        status: "stable",
-        date: "1 day ago",
-        },
-        {
-        id: 4,
-        name: "Carlos Mendoza",
-        oldBMI: 19.1,
-        newBMI: 18.5,
-        status: "declined",
-        date: "1 day ago",
-        },
-        {
-        id: 5,
-        name: "Sofia Garcia",
-        oldBMI: 16.8,
-        newBMI: 17.4,
-        status: "improved",
-        date: "2 days ago",
-        },
-    ];
+        if (typeof parsed === "string") {
+            const raw = parsed.trim();
+            if (!raw) {
+                return "";
+            }
+            try {
+                parsed = JSON.parse(raw);
+            } catch (error) {
+                parsed = raw;
+            }
+        }
+
+        let latest = parsed;
+        if (Array.isArray(parsed)) {
+            latest = parsed.length ? parsed[parsed.length - 1] : "";
+        }
+
+        const normalized = String(latest ?? "")
+            .trim()
+            .replace(/^"+|"+$/g, "")
+            .toLowerCase();
+
+        return normalized;
+    };
+
+    const studentsInScope = selectedSection === "all"
+        ? students
+        : students.filter((student) => {
+            const sectionId = Array.isArray(student)
+                ? student[6]
+                : student?.section_id ?? student?.sectionId ?? "";
+            return String(sectionId) === String(selectedSection);
+        });
+
+    const atRiskStudentsCount = studentsInScope.reduce((count, student) => {
+        const bmiStatusRaw = Array.isArray(student)
+            ? student[11]
+            : student?.bmi_measurement ?? student?.bmiStatus ?? student?.bmi_status ?? "";
+        const latestStatus = getLatestBmiStatus(bmiStatusRaw);
+        if (latestStatus === "underweight" || latestStatus === "overweight") {
+            return count + 1;
+        }
+        return count;
+    }, 0);
+
+    const bmiData = useMemo(() => {
+        const parseCount = (value) => {
+            const parsed = Number(value);
+            return Number.isNaN(parsed) ? 0 : parsed;
+        };
+
+        const formatMonthLabel = (rawMonth) => {
+            const parsedDate = new Date(rawMonth);
+            if (Number.isNaN(parsedDate.getTime())) {
+                return String(rawMonth || "");
+            }
+            return parsedDate.toLocaleDateString("en-US", {
+                month: "short",
+                year: "numeric",
+                timeZone: "UTC",
+            });
+        };
+
+        const normalizedRows = statusSummaryRows
+            .map((row) => {
+                if (!Array.isArray(row) || row.length < 5) {
+                    return null;
+                }
+
+                return {
+                    sectionId: String(row[0] ?? ""),
+                    month: String(row[1] ?? ""),
+                    overweight: parseCount(row[2]),
+                    normal: parseCount(row[3]),
+                    underweight: parseCount(row[4]),
+                };
+            })
+            .filter(Boolean)
+            .filter((row) => row.month);
+
+        const filteredRows = selectedSection === "all"
+            ? normalizedRows
+            : normalizedRows.filter((row) => row.sectionId === String(selectedSection));
+
+        const monthlyTotalsMap = new Map();
+        filteredRows.forEach((row) => {
+            if (!monthlyTotalsMap.has(row.month)) {
+                monthlyTotalsMap.set(row.month, {
+                    month: row.month,
+                    overweight: 0,
+                    normal: 0,
+                    underweight: 0,
+                });
+            }
+
+            const aggregate = monthlyTotalsMap.get(row.month);
+            aggregate.overweight += row.overweight;
+            aggregate.normal += row.normal;
+            aggregate.underweight += row.underweight;
+        });
+
+        const chartRows = Array.from(monthlyTotalsMap.values())
+            .sort((left, right) => {
+                const leftTime = Date.parse(left.month);
+                const rightTime = Date.parse(right.month);
+                const safeLeft = Number.isNaN(leftTime) ? 0 : leftTime;
+                const safeRight = Number.isNaN(rightTime) ? 0 : rightTime;
+                return safeLeft - safeRight;
+            })
+            .slice(-4)
+            .map((row) => ({
+                month: formatMonthLabel(row.month),
+                underweight: row.underweight,
+                normal: row.normal,
+                overweight: row.overweight,
+            }));
+
+        return chartRows;
+    }, [statusSummaryRows, selectedSection]);
+
+    const parseHistoryArray = (value) => {
+        if (Array.isArray(value)) {
+            return value;
+        }
+        if (value == null) {
+            return [];
+        }
+        const raw = String(value).trim();
+        if (!raw) {
+            return [];
+        }
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [parsed];
+        } catch (error) {
+            return [raw];
+        }
+    };
+
+    const normalizeBmiStatus = (value) => {
+        const status = String(value ?? "")
+            .trim()
+            .replace(/^"+|"+$/g, "")
+            .toLowerCase();
+        if (status === "normal" || status === "underweight" || status === "overweight") {
+            return status;
+        }
+        return "";
+    };
+
+    const getUpdateStatus = (previousStatus, currentStatus) => {
+        if (!previousStatus || !currentStatus || previousStatus === currentStatus) {
+            return "stable";
+        }
+        const prevRisk = previousStatus === "underweight" || previousStatus === "overweight";
+        const currentRisk = currentStatus === "underweight" || currentStatus === "overweight";
+        if (prevRisk && currentStatus === "normal") {
+            return "improved";
+        }
+        if (previousStatus === "normal" && currentRisk) {
+            return "declined";
+        }
+        return "declined";
+    };
+
+    const getDaysAgoLabel = (value) => {
+        if (!value) {
+            return "-";
+        }
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) {
+            return "-";
+        }
+        const diffMs = Math.max(0, Date.now() - parsed.getTime());
+        const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        if (days <= 0) {
+            return "Today";
+        }
+        if (days === 1) {
+            return "1 day ago";
+        }
+        return `${days} days ago`;
+    };
+
+    const recentUpdates = useMemo(() => {
+        const toNumber = (value) => {
+            const parsed = Number(value);
+            return Number.isNaN(parsed) ? null : Number(parsed.toFixed(1));
+        };
+
+        const updates = students
+            .map((student, index) => {
+                const isArrayRow = Array.isArray(student);
+                const studentId = isArrayRow ? student[0] : student?.student_id ?? student?.id ?? index;
+                const firstName = isArrayRow ? student[1] : student?.first_name ?? student?.firstName ?? "";
+                const lastName = isArrayRow ? student[2] : student?.last_name ?? student?.lastName ?? "";
+                const bmiHistoryRaw = isArrayRow ? student[10] : student?.bmi;
+                const statusHistoryRaw = isArrayRow
+                    ? student[11]
+                    : student?.bmi_measurement ?? student?.bmiStatus ?? student?.bmi_status;
+                const updatedAtRaw = isArrayRow ? student[17] : student?.updated_at ?? student?.updatedAt ?? "";
+
+                const statusHistory = parseHistoryArray(statusHistoryRaw)
+                    .map(normalizeBmiStatus)
+                    .filter(Boolean);
+
+                // Only include students that already have at least one update.
+                if (statusHistory.length < 2) {
+                    return null;
+                }
+
+                const bmiHistory = parseHistoryArray(bmiHistoryRaw);
+                const previousStatus = statusHistory[statusHistory.length - 2];
+                const currentStatus = statusHistory[statusHistory.length - 1];
+                const previousBmi = toNumber(bmiHistory[bmiHistory.length - 2]);
+                const currentBmi = toNumber(bmiHistory[bmiHistory.length - 1]);
+                const updatedAtDate = new Date(updatedAtRaw);
+                const updatedAtMs = Number.isNaN(updatedAtDate.getTime())
+                    ? 0
+                    : updatedAtDate.getTime();
+
+                return {
+                    id: `${studentId}_${updatedAtRaw}_${index}`,
+                    name: `${firstName} ${lastName}`.trim() || "Unknown Student",
+                    oldBMI: previousBmi != null ? previousBmi.toFixed(1) : "-",
+                    newBMI: currentBmi != null ? currentBmi.toFixed(1) : "-",
+                    status: getUpdateStatus(previousStatus, currentStatus),
+                    date: getDaysAgoLabel(updatedAtRaw),
+                    updatedAtMs,
+                };
+            })
+            .filter(Boolean)
+            .sort((left, right) => right.updatedAtMs - left.updatedAtMs)
+            .slice(0, 20);
+
+        return updates;
+    }, [students]);
 
     const getCurrentDate = () => {
         const options = {
@@ -177,6 +549,18 @@ function Dashboard() {
         navigate("/");
     };
 
+    const handleQuickAddFeedingSession = () => {
+        navigate("/FeedingProgram", {
+            state: { openCreateSession: true },
+        });
+    };
+
+    const handleQuickUpdateMeasurement = () => {
+        navigate("/Students", {
+            state: { openMeasurementModal: true },
+        });
+    };
+
     // *Note: Teacher initials
     const getFirstLetters = (str) => {
         const words = str.split(' ');
@@ -189,8 +573,14 @@ function Dashboard() {
         });
         return firstLetters.join(''); 
     }
+
+    //* QUICK ACTIONS
+    // const handleViewStudents = () => {
+
+    // }
+
     // *CHECK IF THERE IS A USER LOGGED
-    if (checkingAuth) {
+    if (checkingAuth || (user?.id && !studentsFetchDone)) {
         return (
             <div className='comp-loading'>
                 <Loading />
@@ -314,10 +704,12 @@ function Dashboard() {
                     value={selectedSection}
                     onChange={(e) => setSelectedSection(e.target.value)}
                     >
-                    <option value="Section A">Section A</option>
-                    <option value="Section B">Section B</option>
-                    <option value="Section C">Section C</option>
-                    <option value="Section D">Section D</option>
+                    <option value="all">All</option>
+                    {sections.map((section) => (
+                        <option key={section.id} value={section.id}>
+                            {section.name}
+                        </option>
+                    ))}
                     </select>
                 </div>
 
@@ -371,7 +763,7 @@ function Dashboard() {
                         </div>
                     </div>
                     <div className="dashboard-card-content">
-                        <h3>48</h3>
+                        <h3>{studentsInScope.length}</h3>
                         <p>Enrolled Students</p>
                     </div>
                     </div>
@@ -394,7 +786,7 @@ function Dashboard() {
                         </div>
                     </div>
                     <div className="dashboard-card-content">
-                        <h3>5</h3>
+                        <h3>{atRiskStudentsCount}</h3>
                         <p>At-Risk Students</p>
                     </div>
                     </div>
@@ -411,31 +803,63 @@ function Dashboard() {
                             strokeLinecap="round"
                             strokeLinejoin="round"
                             strokeWidth={2}
-                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                            d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
                             />
                         </svg>
                         </div>
                     </div>
                     <div className="dashboard-card-content">
                         <h3>
-                        <span className="dashboard-card-status completed">
-                            <svg
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            style={{ width: "1rem", height: "1rem" }}
-                            >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M5 13l4 4L19 7"
-                            />
-                            </svg>
-                            Completed
+                        <span className={`dashboard-card-status ${nearestSessionStatus.kind}`}>
+                            {nearestSessionStatus.kind === "today" && (
+                                <svg
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                    style={{ width: "1rem", height: "1rem" }}
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M5 13l4 4L19 7"
+                                    />
+                                </svg>
+                            )}
+                            {nearestSessionStatus.kind === "upcoming" && (
+                                <svg
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                    style={{ width: "1rem", height: "1rem" }}
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                                    />
+                                </svg>
+                            )}
+                            {nearestSessionStatus.kind === "empty" && (
+                                <svg
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                    style={{ width: "1rem", height: "1rem" }}
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M8 12h8m8 0a9 9 0 11-18 0 9 9 0 0118 0z"
+                                    />
+                                </svg>
+                            )}
+                            {nearestSessionStatus.title}
                         </span>
                         </h3>
-                        <p>Today's Feeding Status</p>
+                        <p>{nearestSessionStatus.description}</p>
                     </div>
                     </div>
 
@@ -457,8 +881,8 @@ function Dashboard() {
                         </div>
                     </div>
                     <div className="dashboard-card-content">
-                        <h3>3</h3>
-                        <p>Requiring Attention</p>
+                        <h3>{totalCompletedSessions}</h3>
+                        <p>Total Completed Sessions</p>
                     </div>
                     </div>
                 </div>
@@ -469,57 +893,64 @@ function Dashboard() {
                     <div className="dashboard-chart-card">
                     <div className="dashboard-chart-header">
                         <h3>BMI Distribution Trend</h3>
-                        <p>Weekly progress for {selectedSection}</p>
+                        <p>Weekly progress for {selectedSectionLabel}</p>
                     </div>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={bmiData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                        <XAxis dataKey="week" stroke="#6b7280" fontSize={12} />
-                        <YAxis stroke="#6b7280" fontSize={12} />
-                        <Tooltip
-                            contentStyle={{
-                            backgroundColor: "#ffffff",
-                            border: "1px solid #e5e7eb",
-                            borderRadius: "0.5rem",
-                            }}
-                        />
-                        <Legend wrapperStyle={{ fontSize: "14px" }} />
-                        <Bar
-                            dataKey="underweight"
-                            fill="#fb923c"
-                            name="Underweight"
-                            radius={[8, 8, 0, 0]}
-                        />
-                        <Bar
-                            dataKey="normal"
-                            fill="#22c55e"
-                            name="Normal"
-                            radius={[8, 8, 0, 0]}
-                        />
-                        <Bar
-                            dataKey="overweight"
-                            fill="#3b82f6"
-                            name="Overweight"
-                            radius={[8, 8, 0, 0]}
-                        />
-                        </BarChart>
-                    </ResponsiveContainer>
+                    {bmiData.length === 0 ? (
+                        <div className="dashboard-chart-empty">No chart data yet.</div>
+                    ) : (
+                        <ResponsiveContainer width="100%" height={300}>
+                            <BarChart data={bmiData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                            <XAxis dataKey="month" stroke="#6b7280" fontSize={12} />
+                            <YAxis stroke="#6b7280" fontSize={12} />
+                            <Tooltip
+                                contentStyle={{
+                                backgroundColor: "#ffffff",
+                                border: "1px solid #e5e7eb",
+                                borderRadius: "0.5rem",
+                                }}
+                            />
+                            <Legend wrapperStyle={{ fontSize: "14px" }} />
+                            <Bar
+                                dataKey="underweight"
+                                fill="#fb923c"
+                                name="Underweight"
+                                radius={[8, 8, 0, 0]}
+                            />
+                            <Bar
+                                dataKey="normal"
+                                fill="#22c55e"
+                                name="Normal"
+                                radius={[8, 8, 0, 0]}
+                            />
+                            <Bar
+                                dataKey="overweight"
+                                fill="#3b82f6"
+                                name="Overweight"
+                                radius={[8, 8, 0, 0]}
+                            />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    )}
                     </div>
 
                     {/* Recent Updates */}
                     <div className="dashboard-updates-card">
                     <div className="dashboard-updates-header">
                         <h3>Recent BMI Updates</h3>
-                        <p>Latest measurements</p>
+                        <p>Latest measurements accross <strong>all sections</strong></p>
                     </div>
                     <div className="dashboard-updates-list">
-                        {recentUpdates.map((update) => (
+                        {recentUpdates.length === 0 ? (
+                            <div className="dashboard-updates-empty">No updates yet.</div>
+                        ) : (
+                            recentUpdates.map((update) => (
                         <div key={update.id} className="dashboard-update-item">
                             <div className="dashboard-update-student">
                             {update.name}
                             </div>
                             <div className="dashboard-update-bmi">
-                            {update.oldBMI} → {update.newBMI}
+                            {update.oldBMI} -&gt; {update.newBMI}
                             <span className={`dashboard-update-arrow ${update.status}`}>
                                 {update.status === "improved" && (
                                 <>
@@ -579,7 +1010,8 @@ function Dashboard() {
                             </div>
                             <div className="dashboard-update-date">{update.date}</div>
                         </div>
-                        ))}
+                        ))
+                        )}
                     </div>
                     </div>
                 </div>
@@ -590,7 +1022,7 @@ function Dashboard() {
                     <h3>Quick Actions</h3>
                     </div>
                     <div className="dashboard-actions-buttons">
-                    <button className="dashboard-action-button">
+                    <button className="dashboard-action-button" onClick={handleQuickAddFeedingSession}>
                         <div className="dashboard-action-button-icon">
                         <svg
                             fill="none"
@@ -608,7 +1040,7 @@ function Dashboard() {
                         <span>Add Feeding Session</span>
                     </button>
 
-                    <button className="dashboard-action-button">
+                    <button className="dashboard-action-button" onClick={() => linkNavigate(3)}>
                         <div className="dashboard-action-button-icon">
                         <svg
                             fill="none"
@@ -626,7 +1058,8 @@ function Dashboard() {
                         <span>View Students</span>
                     </button>
 
-                    <button className="dashboard-action-button">
+                                        <button className="dashboard-action-button" onClick={handleQuickUpdateMeasurement}>
+
                         <div className="dashboard-action-button-icon">
                         <svg
                             fill="none"
@@ -647,7 +1080,7 @@ function Dashboard() {
                 </div>
                 </div>
             </main>
-            <button onClick={handleMe}>click me</button>
+            {/* <button onClick={handleMe}>click me</button> */}
     </div>
     )
 }

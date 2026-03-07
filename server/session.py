@@ -31,7 +31,7 @@ def f_get_all_session(user_id):
                 'sessions': result 
             }
     except Error as e:
-        print(f"f_update_section!Error in inserting student: {e}")
+        print(f"f_get_all_session!Error in getting all session: {e}")
         return { 'status': False }
     finally:
         mysqldb.close()
@@ -134,6 +134,17 @@ def f_delete_session(data):
         return { 'status': False, 'message': 'Missing userId or sessionId' }
 
     try:
+        # Ensure the session belongs to the requesting teacher before deleting anything.
+        verify_query = "SELECT 1 FROM tblSessions WHERE teacher_id = %s AND session_id = %s LIMIT 1"
+        cursor.execute(verify_query, (user_id, session_id))
+        owned_session = cursor.fetchone()
+        if not owned_session:
+            return { 'status': False, 'message': 'Session not found or unauthorized' }
+
+        # Delete attendance rows tied to this session first (no orphan attendance).
+        delete_attendance_query = "DELETE FROM tblAttendance WHERE session_id = %s"
+        cursor.execute(delete_attendance_query, (session_id,))
+
         delete_query = "DELETE FROM tblSessions WHERE teacher_id = %s AND session_id = %s"
         cursor.execute(delete_query, (user_id, session_id))
         mysqldb.commit()
@@ -179,3 +190,80 @@ def f_update_session_information(data):
         return { 'status': False }
     finally:
         mysqldb.close()
+
+
+
+def _f_get_session_dashboard_summary(user_id):
+    mysqldb, cursor = connect_to_db()
+    print("Im in _f_get_session_dashboard_summary!")
+    print(user_id)
+
+    if not user_id:
+        mysqldb.close()
+        return {
+            "status": False,
+            "message": "Missing userId",
+            "sessions": [],
+            "totalCompleted": 0,
+        }
+
+    try:
+        nearest_query = """
+            SELECT session_id, session_date, status, created_at, updated_at
+            FROM tblSessions
+            WHERE teacher_id = %s AND session_date >= CURRENT_DATE
+            ORDER BY session_date
+            LIMIT 1
+        """
+        cursor.execute(nearest_query, (user_id,))
+        nearest_rows = cursor.fetchall()
+
+        total_completed_query = """
+            SELECT COUNT(*) AS total_completed
+            FROM tblSessions
+            WHERE status = 'completed' AND teacher_id = %s
+        """
+        cursor.execute(total_completed_query, (user_id,))
+        total_completed_row = cursor.fetchone()
+        total_completed = int(total_completed_row[0]) if total_completed_row else 0
+
+        return {
+            "status": True,
+            "sessions": nearest_rows,
+            "nearestSession": nearest_rows[0] if nearest_rows else None,
+            "totalCompleted": total_completed,
+        }
+    except Error as e:
+        print(f"_f_get_session_dashboard_summary!Error in getting dashboard session summary: {e}")
+        return {
+            "status": False,
+            "sessions": [],
+            "nearestSession": None,
+            "totalCompleted": 0,
+        }
+    finally:
+        mysqldb.close()
+
+
+def f_get_nearest_upcoming_session(user_id):
+    print("Im in f_get_nearest_upcoming_session!")
+    return _f_get_session_dashboard_summary(user_id)
+
+
+def f_get_total_completed_session(user_id):
+    print("Im in f_get_total_completed_session!")
+    summary = _f_get_session_dashboard_summary(user_id)
+
+    if not summary.get("status"):
+        return {
+            "status": False,
+            "sessions": [],
+            "totalCompleted": 0,
+        }
+
+    total_completed = summary.get("totalCompleted", 0)
+    return {
+        "status": True,
+        "sessions": [(total_completed,)],
+        "totalCompleted": total_completed,
+    }

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "../styles/FeedingProgramStyle.css";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { Helmet } from "react-helmet";
 import axios from "axios";
 import { apiFetch, initAuth, logout } from "../api";
@@ -127,27 +127,87 @@ const truncateOneLine = (text, max = 38) => {
 
 const uniqueId = (prefix = "id") => `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
 
+const getLastWeekdayOfMonth = (year, monthIndex, weekday) => {
+  const d = new Date(year, monthIndex + 1, 0);
+  d.setHours(0, 0, 0, 0);
+  while (d.getDay() !== weekday) {
+    d.setDate(d.getDate() - 1);
+  }
+  return d;
+};
+
+const buildPhilippineHolidayMap = (year) => {
+  const map = new Map();
+
+  const addHoliday = (date, name, type = "regular", shortLabel = "") => {
+    map.set(toISODate(date), {
+      name,
+      type,
+      shortLabel: shortLabel || name,
+    });
+  };
+
+  // Regular holidays (nationwide)
+  addHoliday(new Date(year, 0, 1), "New Year's Day");
+  addHoliday(new Date(year, 3, 9), "Araw ng Kagitingan", "regular", "Day of Valor");
+  addHoliday(new Date(year, 4, 1), "Labor Day");
+  addHoliday(new Date(year, 5, 12), "Independence Day");
+  addHoliday(getLastWeekdayOfMonth(year, 7, 1), "National Heroes Day");
+  addHoliday(new Date(year, 10, 30), "Bonifacio Day");
+  addHoliday(new Date(year, 11, 25), "Christmas Day");
+  addHoliday(new Date(year, 11, 30), "Rizal Day");
+
+  // Special non-working holidays (nationwide fixed dates)
+  addHoliday(new Date(year, 1, 25), "EDSA People Power Revolution Anniversary", "special", "EDSA Day");
+  addHoliday(new Date(year, 7, 21), "Ninoy Aquino Day");
+  addHoliday(new Date(year, 10, 1), "All Saints' Day");
+  addHoliday(new Date(year, 11, 8), "Feast of the Immaculate Conception", "special", "Immaculate Conception");
+  addHoliday(new Date(year, 11, 31), "Last Day of the Year", "special", "Year End");
+
+  return map;
+};
+
+const getPhilippineHolidayByISO = (iso) => {
+  const raw = String(iso || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return null;
+  }
+  const year = parseInt(raw.slice(0, 4), 10);
+  if (Number.isNaN(year)) {
+    return null;
+  }
+  return buildPhilippineHolidayMap(year).get(raw) || null;
+};
+
 
 // ==============================
 // Component
 // ==============================
 function FeedingProgram() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState(null);
-  
-      useEffect(() => {
-          let isMounted = true;
-          const loadUser = async () => {
-              const data = await initAuth();
-              if (isMounted && data?.status) {
-                  setUser(data);
-              }
-          };
-          loadUser();
-          return () => {
-              isMounted = false;
-          };
-      }, []);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadUser = async () => {
+      const data = await initAuth();
+      if (!isMounted) {
+        return;
+      }
+      if (data?.status) {
+        setUser(data);
+      } else {
+        navigate("/");
+      }
+      setCheckingAuth(false);
+    };
+    loadUser();
+    return () => {
+      isMounted = false;
+    };
+  }, [navigate]);
 
   // NOTE: Keeping auth out for now to respect “no API calls”
   // TODO: Integrate initAuth() or existing auth flow here (client-side only)
@@ -205,6 +265,24 @@ function FeedingProgram() {
   // Optional top filter (read-only per prompt)
   const [topFilter] = useState("All");
 
+  useEffect(() => {
+    if (!location.state?.openCreateSession) {
+      return;
+    }
+
+    setEditingSessionId(null);
+    setForm({
+      date: "",
+      section_ids: [],
+      sponsors_text: "",
+      foods_text: "",
+    });
+    setFormErrors({});
+    setIsPanelOpen(true);
+
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
+
   // ==========================
   // Derived data
   // ==========================
@@ -231,6 +309,10 @@ function FeedingProgram() {
     });
     return map;
   }, [monthSessions]);
+
+  const holidaysByDate = useMemo(() => {
+    return buildPhilippineHolidayMap(monthCursor.year);
+  }, [monthCursor.year]);
 
   const sectionLabelById = useMemo(() => {
     const m = new Map();
@@ -281,20 +363,6 @@ function FeedingProgram() {
   // Effects
   // ==========================
   // Removed dummy session seeding; sessions now come from the API.
-
-  useEffect(() => {
-    let isMounted = true;
-    const loadUser = async () => {
-      const data = await initAuth();
-      if (isMounted && data?.status) {
-        setUser(data);
-      }
-    };
-    loadUser();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -563,9 +631,12 @@ function FeedingProgram() {
       errors.date = "Please select a date.";
     } else {
       const d = fromISODate(iso);
+      const holiday = getPhilippineHolidayByISO(iso);
 
       if (isPast(d)) {
         errors.date = "Past dates are not allowed.";
+      } else if (holiday) {
+        errors.date = `The chosen date is a holiday (${holiday.name}). Please select another date.`;
       } else if (!isWeekday(d)) {
         errors.date = "Only weekdays (Mon–Fri) are allowed.";
       } else {
@@ -1088,12 +1159,15 @@ function FeedingProgram() {
   // ==========================
   // UI
   // ==========================
+  if (checkingAuth) {
+    return (
+      <div className='comp-loading'>
+        <Loading />
+      </div>
+    );
+  }
   if (user == null) {
-        return (
-            <div className='comp-loading'>
-                <Loading />
-            </div>
-        )
+    return null;
   }
 
   return (
@@ -1365,12 +1439,23 @@ function FeedingProgram() {
                     }
 
                     const daySessions = sessionsByDate.get(cell.iso) || [];
+                    const holiday = holidaysByDate.get(cell.iso);
                     return (
                       <div
                         key={cell.key}
-                        className={`feeding-calendar-cell ${cell.isToday ? "today" : ""}`}
+                        className={`feeding-calendar-cell ${cell.isToday ? "today" : ""} ${holiday ? "holiday" : ""}`}
                       >
-                        <div className="feeding-calendar-daynum">{cell.dayNumber}</div>
+                        <div className="feeding-calendar-dayhead">
+                          <div className="feeding-calendar-daynum">{cell.dayNumber}</div>
+                          {holiday ? (
+                            <span
+                              className={`feeding-holiday-tag ${holiday.type === "special" ? "special" : ""}`}
+                              title={holiday.name}
+                            >
+                              {holiday.shortLabel}
+                            </span>
+                          ) : null}
+                        </div>
 
                         <div className="feeding-calendar-events">
                           {daySessions.slice(0, 3).map((s) => (
@@ -1398,7 +1483,7 @@ function FeedingProgram() {
           {/* Right column (Create/Edit panel) */}
           {isPanelOpen ? (
             <aside className="feeding-right-panel">
-              <div className="feeding-panel-content">
+              <div className={`feeding-panel-content ${isEditing ? "is-editing" : ""}`}>
                 <div className="feeding-panel-header">
                   <div className="feeding-panel-title-row">
                     <h2>{isEditing ? "Edit Session" : "Create Session"}</h2>

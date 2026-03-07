@@ -203,7 +203,7 @@ function Login() {
             </div>
 
             {/* Social Login Buttons */}
-            <div className="social-buttons">
+            {/* <div className="social-buttons">
               <button type="button" className="social-button">
                 <svg viewBox="0 0 24 24">
                   <path
@@ -231,7 +231,7 @@ function Login() {
                 </svg>
                 Facebook
               </button>
-            </div>
+            </div> */}
 
             {/* Sign Up Link */}
             <p className="signup-link">

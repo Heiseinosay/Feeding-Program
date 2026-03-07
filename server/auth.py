@@ -79,7 +79,7 @@ def f_me(user_id):
     mysqldb, cursor = connect_to_db()
     try:
         read_query = (
-            "SELECT teacher_id, first_name, last_name, email, mobile_no, is_first_login "
+            "SELECT teacher_id, first_name, last_name, email, mobile_no, is_first_login, school_name, created_at "
             "FROM tblTeachers WHERE teacher_id = %s"
         )
         cursor.execute(read_query, (user_id,))
@@ -100,6 +100,8 @@ def f_me(user_id):
             "email": result[3],
             "mobile_no": result[4],
             "is_first_login": result[5],
+            "school_name": result[6],
+            "created_at": result[7]
         }), 200
 
     except Error as e:
@@ -144,6 +146,36 @@ def f_auth_first_update_password(data):
         return { 'status': True }
     except Error as e:
         print(f"Error in updating: {e}")
+        return { 'status': False }
+    finally:
+        mysqldb.close()
+
+
+
+def f_auth_update_user_information(data):
+    mysqldb, cursor = connect_to_db()
+    print("Im in f_auth_update_user_information!")
+    first_name = data.get('firstName')
+    last_name = data.get('lastName')
+    mobile_no = data.get('mobileNo')
+    user_id = data.get('userId')
+
+    print(user_id, first_name, last_name, mobile_no)
+
+    # return
+    try:
+    # UPDATE TASK
+        update_query = """
+            UPDATE tblTeachers 
+            SET first_name=%s, last_name=%s, mobile_no=%s
+            WHERE teacher_id=%s
+        """
+        cursor.execute(update_query, (first_name, last_name, mobile_no, user_id))
+        mysqldb.commit()
+    
+        return { 'status': True }
+    except Error as e:
+        print(f"Error in updating user information: {e}")
         return { 'status': False }
     finally:
         mysqldb.close()

@@ -9,8 +9,16 @@ CREATE TABLE tblTeachers (
     Password VARCHAR(255),
     mobile_no VARCHAR(255),
     school_name VARCHAR(255),
-    is_first_login boolean
+    is_first_login boolean,
+    
+    -- Metadata
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) AUTO_INCREMENT = 101;
+
+ALTER TABLE tblTeachers
+  ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 
 CREATE TABLE tblStudents (
 	student_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -84,7 +92,7 @@ DROP COLUMN section_seq
 
 -- SAMPLE DATA INSERT
 INSERT INTO tblTeachers (first_name, last_name, email, mobile_no, Password, is_first_login) VALUES ("Nikka Noreine", "Reyes", "reimarkable@gmail.com", "09498112655", "123", True);
-INSERT INTO tblTeachers (first_name, last_name, email, mobile_no, Password, is_first_login) VALUES ("Jeleazar", "Pacolor", "jepacolor.f@gmail.com", "09498112655", "123", True);
+INSERT INTO tblTeachers (first_name, last_name, email, mobile_no, Password, is_first_login) VALUES ("Oreo", "Pacolor", "oreo@gmail.com", "09498112655", "123", True);
 INSERT INTO tblSessions (teacher_id, session_date, status, participating_section, sponsors, foods_serve) VALUES (101, '2026-01-15', "pending", '["101_Reyes_2001"]', "Barangay Chairman", "Spaghetti");
 INSERT INTO tblStudents
 (
@@ -152,17 +160,133 @@ SET bmi_measurement = JSON_REPLACE(
 )
 WHERE JSON_LENGTH(bmi_measurement) > 0
   AND JSON_UNQUOTE(JSON_EXTRACT(bmi_measurement, CONCAT('$[', JSON_LENGTH(bmi_measurement) - 1, ']'))) = 'uunderweight';
+  
+# UPDATE tblteachers
+# SET school_name = 'Nueva Ecija High School'
+# WHERE school_name IS NULL
 
 SELECT * FROM tblteachers
 SELECT * FROM tblStudents
 WHERE student_id = 1001
-SELECT * FROM tblStudents
+SELECT * FROM tblStudents WHERE teacher_id = 101 AND section_id = '101_Reyes_2001'
 SELECT * FROM tblSections
 SELECT * FROM tblSessions
 SELECT * FROM tblAttendance
 
+# SELECT TOTAL STUDENTS FOR EACH STATUS AND SECTION
+WITH flattened AS (
+SELECT
+	s.student_id,
+	s.section_id,
+	jt.mdate AS measurement_date,
+	DATE_FORMAT(jt.mdate, '%Y-%m-01') AS month_key,
+	JSON_UNQUOTE(JSON_EXTRACT(s.bmi_measurement, CONCAT('$[', jt.rn - 1, ']'))) AS bmi_status
+FROM tblStudents s
+JOIN JSON_TABLE(
+	s.measurement_date,
+	'$[*]' COLUMNS (
+	rn FOR ORDINALITY,
+	mdate DATE PATH '$'
+	)
+) jt
+WHERE s.teacher_id = 101
+),
+ranked AS (
+SELECT
+	*,
+	ROW_NUMBER() OVER (
+	PARTITION BY student_id, section_id, month_key
+	ORDER BY measurement_date DESC
+	) AS rn_latest
+FROM flattened
+),
+latest_per_month AS (
+SELECT
+	student_id,
+	section_id,
+	month_key,
+	bmi_status
+FROM ranked
+WHERE rn_latest = 1
+)
+SELECT
+section_id,
+month_key AS month,
+SUM(bmi_status = 'overweight')  AS overweight_count,
+SUM(bmi_status = 'normal')      AS normal_count,
+SUM(bmi_status = 'underweight') AS underweight_count,
+COUNT(*)                        AS total_students_counted
+FROM latest_per_month
+GROUP BY section_id, month_key
+ORDER BY section_id, month_key;
+
+# SELECT TOTAL STUDENTS FOR EACH STATUS AND SECTION
+WITH flattened AS (
+  SELECT
+    s.student_id,
+    s.section_id,
+    jt.mdate AS measurement_date,
+    DATE_FORMAT(jt.mdate, '%Y-%m-01') AS month_key,
+    JSON_UNQUOTE(JSON_EXTRACT(s.bmi_measurement, CONCAT('$[', jt.rn - 1, ']'))) AS bmi_status
+  FROM tblStudents s
+  JOIN JSON_TABLE(
+    s.measurement_date,
+    '$[*]' COLUMNS (
+      rn FOR ORDINALITY,
+      mdate DATE PATH '$'
+    )
+  ) jt
+  WHERE s.teacher_id = 101
+),
+ranked AS (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY student_id, section_id, month_key
+      ORDER BY measurement_date DESC
+    ) AS rn_latest
+  FROM flattened
+),
+latest_per_month AS (
+  SELECT
+    student_id,
+    section_id,
+    month_key,
+    bmi_status
+  FROM ranked
+  WHERE rn_latest = 1
+)
+SELECT
+  section_id,
+  month_key AS month,
+  SUM(bmi_status = 'overweight')  AS overweight_count,
+  SUM(bmi_status = 'normal')      AS normal_count,
+  SUM(bmi_status = 'underweight') AS underweight_count,
+  COUNT(*)                        AS total_students_counted
+FROM latest_per_month
+GROUP BY section_id, month_key
+ORDER BY section_id, month_key;
+
+# SELECT LATEST FEEDING PROGRAM
+SELECT session_id, session_date, status, created_at, updated_at
+FROM tblsessions
+WHERE teacher_id = 101 AND session_date >= CURRENT_DATE 
+ORDER BY session_date 
+LIMIT 1
 
 
+# SELET TOTAL COMPLETED FEEDING PROGRAM
+SELECT COUNT(*) AS total_completed
+FROM tblSessions
+WHERE status = 'completed' AND teacher_id = 101
+
+
+# DELETE ATTENDANCE THAT HAS DELETE SESSION
+DELETE FROM tblAttendance
+WHERE session_id NOT IN (
+	SELECT session_id
+    FROM tblSessions
+    )
 
 
 -- SECTIONS SEQUENCE

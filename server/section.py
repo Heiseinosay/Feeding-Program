@@ -162,6 +162,9 @@ def f_delete_section(data):
     try:
         delete_query = "DELETE FROM tblSections WHERE teacher_id = %s AND section_id = %s"
         cursor.execute(delete_query, (user_id, section_id))
+
+        delete_query = "DELETE FROM tblStudents WHERE teacher_id = %s AND section_id = %s"
+        cursor.execute(delete_query, (user_id, section_id))
         mysqldb.commit()
 
         return { 'status': True }
