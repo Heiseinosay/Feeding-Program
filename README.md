@@ -1,3 +1,1 @@
 ﻿# Feeding-Program
-## To Setup 
-Run setup.bat Once
