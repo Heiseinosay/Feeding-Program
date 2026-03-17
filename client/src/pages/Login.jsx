@@ -24,6 +24,14 @@ function Login() {
     const [loading, setLoading] = useState(false);
     const [checkingAuth, setCheckingAuth] = useState(true);
 
+    const navigateToFirstLoginChangePassword = (mail, uid, replace = true) => {
+        if (!mail || !uid) {
+            navigate("/dashboard", { replace });
+            return;
+        }
+        navigate(`/ChangePassword/${encodeURIComponent(mail)}/${uid}`, { replace });
+    };
+
     useEffect(() => {
         let isMounted = true;
         const checkExistingLogin = async () => {
@@ -32,7 +40,11 @@ function Login() {
                 return;
             }
             if (data?.status) {
-                navigate("/dashboard");
+                if (data.is_first_login) {
+                    navigateToFirstLoginChangePassword(data.email, data.id, true);
+                } else {
+                    navigate("/dashboard", { replace: true });
+                }
                 return;
             }
             setCheckingAuth(false);
@@ -74,9 +86,9 @@ function Login() {
                     if(data.user.is_first_login) {
                       // **Note: if first login, it should naviggate to changhe password
                       console.log(data.user.is_first_login);
-                      navigate(`/ChangePassword/${data.user.mail}/${data.user.user_id}`)
+                      navigateToFirstLoginChangePassword(data.user.mail, data.user.user_id, true);
                     } else {
-                      navigate("/dashboard")
+                      navigate("/dashboard", { replace: true });
                     }
                     
                     // alert("success!")

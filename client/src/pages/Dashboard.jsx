@@ -5,6 +5,8 @@ import axios from 'axios';
 import {
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -33,6 +35,7 @@ function Dashboard() {
     const [students, setStudents] = useState([]);
     const [sections, setSections] = useState([]);
     const [statusSummaryRows, setStatusSummaryRows] = useState([]);
+    const [bmiTrendRows, setBmiTrendRows] = useState([]);
     const [nearestSessionStatus, setNearestSessionStatus] = useState({
         kind: "empty",
         title: "Empty",
@@ -174,6 +177,35 @@ function Dashboard() {
                 setStatusSummaryRows([]);
             });
     }, [user?.id]);
+
+    useEffect(() => {
+        if (!user?.id) {
+            setBmiTrendRows([]);
+            return;
+        }
+
+        axios
+            .get("/api/get_bmi_trend", {
+                params: { userId: user.id },
+            })
+            .then((response) => {
+                const data = response.data;
+                if (!data?.status) {
+                    console.warn("Dashboard get_bmi_trend failed:", data);
+                    setBmiTrendRows([]);
+                    return;
+                }
+
+                const summaryRows = Array.isArray(data.Summary) ? data.Summary : [];
+                setBmiTrendRows(summaryRows);
+                console.log("Dashboard BMI trend:", summaryRows);
+            })
+            .catch((error) => {
+                console.error("Dashboard get_bmi_trend error:", error);
+                setBmiTrendRows([]);
+            });
+    }, [user?.id]);
+
 
     useEffect(() => {
         const emptyState = {
@@ -396,6 +428,75 @@ function Dashboard() {
 
         return chartRows;
     }, [statusSummaryRows, selectedSection]);
+
+    const bmiLineData = useMemo(() => {
+        const toMonthLabel = (rawMonth) => {
+            const raw = String(rawMonth ?? "").trim();
+            if (!raw) {
+                return "";
+            }
+            const [yearStr, monthStr] = raw.split("-");
+            const year = Number(yearStr);
+            const month = Number(monthStr);
+            if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+                return raw;
+            }
+            return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-US", {
+                month: "short",
+                year: "numeric",
+                timeZone: "UTC",
+            });
+        };
+
+        const normalizedRows = bmiTrendRows
+            .map((row) => {
+                if (!Array.isArray(row) || row.length < 3) {
+                    return null;
+                }
+
+                const sectionId = String(row[0] ?? "");
+                const measurementMonth = String(row[1] ?? "").trim();
+                const averageBmi = Number(row[2]);
+
+                if (!measurementMonth || Number.isNaN(averageBmi)) {
+                    return null;
+                }
+
+                return {
+                    sectionId,
+                    measurementMonth,
+                    averageBmi: Number(averageBmi.toFixed(2)),
+                };
+            })
+            .filter(Boolean);
+
+        const filteredRows = selectedSection === "all"
+            ? normalizedRows
+            : normalizedRows.filter((row) => row.sectionId === String(selectedSection));
+
+        const monthlyMap = new Map();
+        filteredRows.forEach((row) => {
+            if (!monthlyMap.has(row.measurementMonth)) {
+                monthlyMap.set(row.measurementMonth, {
+                    measurementMonth: row.measurementMonth,
+                    totalAverageBmi: 0,
+                    rowCount: 0,
+                });
+            }
+
+            const aggregate = monthlyMap.get(row.measurementMonth);
+            aggregate.totalAverageBmi += row.averageBmi;
+            aggregate.rowCount += 1;
+        });
+
+        return Array.from(monthlyMap.values())
+            .sort((left, right) => left.measurementMonth.localeCompare(right.measurementMonth))
+            .slice(-6)
+            .map((row) => ({
+                month: toMonthLabel(row.measurementMonth),
+                averageBmi: Number((row.totalAverageBmi / Math.max(row.rowCount, 1)).toFixed(2)),
+            }));
+    }, [bmiTrendRows, selectedSection]);
 
     const parseHistoryArray = (value) => {
         if (Array.isArray(value)) {
@@ -1014,6 +1115,49 @@ function Dashboard() {
                         )}
                     </div>
                     </div>
+                </div>
+
+                <div className="dashboard-line-chart-card">
+                    <div className="dashboard-chart-header">
+                        <h3>BMI Average Trend</h3>
+                        <p>Monthly average BMI for {selectedSectionLabel}</p>
+                    </div>
+                    {bmiLineData.length === 0 ? (
+                        <div className="dashboard-chart-empty">No trend data yet.</div>
+                    ) : (
+                        <ResponsiveContainer width="100%" height={300}>
+                            <LineChart
+                                data={bmiLineData}
+                                margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
+                            >
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                                <XAxis dataKey="month" stroke="#6b7280" fontSize={12} />
+                                <YAxis stroke="#6b7280" fontSize={12} />
+                                <Tooltip
+                                    contentStyle={{
+                                        backgroundColor: "#ffffff",
+                                        border: "1px solid #e5e7eb",
+                                        borderRadius: "0.5rem",
+                                    }}
+                                    formatter={(value) => {
+                                        const numericValue = Number(value);
+                                        return [
+                                            Number.isNaN(numericValue) ? "-" : numericValue.toFixed(2),
+                                            "Average BMI",
+                                        ];
+                                    }}
+                                />
+                                <Line
+                                    type="monotone"
+                                    dataKey="averageBmi"
+                                    stroke="#f97316"
+                                    strokeWidth={3}
+                                    dot={{ r: 4 }}
+                                    activeDot={{ r: 6 }}
+                                />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    )}
                 </div>
 
                 {/* Quick Actions */}

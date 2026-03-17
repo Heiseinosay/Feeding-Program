@@ -19,6 +19,7 @@ export default function Profile() {
 
   const mapUserToFormData = (data) => ({
     firstName: data?.first_name || "",
+    middleName: data?.middle_name || "",
     lastName: data?.last_name || "",
     email: data?.email || "",
     mobile: data?.mobile_no || data?.mobile || "",
@@ -47,6 +48,7 @@ export default function Profile() {
         return;
       }
       if (data?.status) {
+        console.log(data)
         setUser(data);
       } else {
         navigate("/");
@@ -62,6 +64,7 @@ export default function Profile() {
   // Personal information form state
   const [formData, setFormData] = useState({
     firstName: "",
+    middleName: "",
     lastName: "",
     email: "",
     mobile: "",
@@ -154,7 +157,7 @@ export default function Profile() {
     const { name } = e.target;
     let value = e.target.value;
 
-    if (name === "firstName" || name === "lastName") {
+    if (name === "firstName" || name === "middleName" || name === "lastName") {
       if (/[^A-Za-z\s]/.test(value)) {
         return;
       }
@@ -186,6 +189,7 @@ export default function Profile() {
   const validateForm = () => {
     const errors = {};
     const firstName = String(formData.firstName || "").trim();
+    const middleName = String(formData.middleName || "").trim();
     const lastName = String(formData.lastName || "").trim();
     const mobile = String(formData.mobile || "").trim();
     const schoolName = String(formData.schoolName || "").trim();
@@ -196,6 +200,11 @@ export default function Profile() {
       errors.firstName = "First name is required";
     } else if (!lettersOnlyPattern.test(firstName)) {
       errors.firstName = "First name must contain letters only.";
+    }
+    if (!middleName) {
+      errors.middleName = "Middle name is required";
+    } else if (!lettersOnlyPattern.test(middleName)) {
+      errors.middleName = "Middle name must contain letters only.";
     }
     if (!lastName) {
       errors.lastName = "Last name is required";
@@ -240,6 +249,7 @@ export default function Profile() {
     const payload = {
       userId: user.id,
       firstName: String(formData.firstName || "").trim(),
+      middleName: String(formData.middleName || "").trim(),
       lastName: String(formData.lastName || "").trim(),
       mobileNo: String(formData.mobile || "").trim(),
     };
@@ -256,15 +266,19 @@ export default function Profile() {
         const nextFormData = {
           ...formData,
           firstName: payload.firstName,
+          middleName: payload.middleName,
           lastName: payload.lastName,
           mobile: payload.mobileNo,
         };
+
+        console.log(nextFormData)
         setFormData(nextFormData);
         setOriginalFormData(nextFormData);
         setIsEdited(false);
         setUser((prev) => ({
           ...(prev || {}),
           first_name: payload.firstName,
+          middle_name: payload.middleName,
           last_name: payload.lastName,
           mobile_no: payload.mobileNo,
         }));
@@ -540,25 +554,47 @@ export default function Profile() {
 
                     <div className="profile-form-field">
                       <label className="profile-form-label required">
-                        Last Name
+                        Middle Name
                       </label>
                       <input
                         type="text"
-                        name="lastName"
-                        value={formData.lastName}
+                        name="middleName"
+                        value={formData.middleName}
                         onChange={handleInputChange}
                         className={`profile-form-input ${
-                          formErrors.lastName ? "error" : ""
+                          formErrors.middleName ? "error" : ""
                         }`}
                         placeholder="Enter last name"
                         maxLength={25}
                       />
-                      {formErrors.lastName && (
+                      {formErrors.middleName && (
                         <span className="profile-form-error">
-                          {formErrors.lastName}
+                          {formErrors.middleName}
                         </span>
                       )}
                     </div>
+                  </div>
+
+                  <div className="profile-form-field is-disabled">
+                    <label className="profile-form-label required">
+                      Last Name
+                    </label>
+                    <input
+                      type="text"
+                      name="lastName"
+                      value={formData.lastName}
+                      onChange={handleInputChange}
+                      className={`profile-form-input ${
+                        formErrors.schoolName ? "error" : ""
+                      }`}
+                      placeholder="Enter last name"
+                      disabled
+                    />
+                    {formErrors.lastName && (
+                      <span className="profile-form-error">
+                        {formErrors.lastName}
+                      </span>
+                    )}
                   </div>
                   
                   <div className="profile-form-field is-disabled">
@@ -641,9 +677,8 @@ export default function Profile() {
                   </button>
                   <button
                     className="profile-button-primary"
-                    // onClick={handleSaveChanges}
-                    // disabled={!isEdited || isSavingProfile}
-                    disabled
+                    onClick={handleSaveChanges}
+                    disabled={!isEdited || isSavingProfile}
                   >
                     {isSavingProfile ? "Saving..." : "Save Changes"}
                   </button>
