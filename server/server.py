@@ -18,7 +18,7 @@ from auth import f_auth_login, f_me, f_auth_first_update_password, f_auth_update
 from students import f_get_all_students, f_add_students, f_add_students_attendance, f_delete_student, f_update_bmi_measurement, f_update_student_information, f_get_student_attendance, f_update_student_measurement_targeted
 from section import f_add_section, f_get_all_section, f_delete_section, f_update_section
 from session import f_get_all_session, f_add_session, f_set_cancel_session, f_set_complete_session, f_delete_session, f_update_session_information, f_get_nearest_upcoming_session, f_get_total_completed_session
-from charts import f_get_all_status_count
+from charts import f_get_all_status_count, f_get_bmi_trend
 
 # to run python -m flask run
 
@@ -141,7 +141,7 @@ def update_section():
     return jsonify(res)
 
 
-# Delete Section 
+# Delete Section    
 @app.route("/api/delete_section", methods=["DELETE"])
 def delete_section():
     data = request.json
@@ -306,6 +306,15 @@ def get_total_completed_session():
 def get_all_status_count():
     user_id = request.args.get("userId")
     res = f_get_all_status_count(user_id)
+    print(res)
+    return res
+
+
+# Fetch line chart bmi trend  
+@app.route("/api/get_bmi_trend", methods=["GET"])
+def get_bmi_trend():
+    user_id = request.args.get("userId")
+    res = f_get_bmi_trend(user_id)
     print(res)
     return res
 

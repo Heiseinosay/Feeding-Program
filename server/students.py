@@ -30,6 +30,7 @@ def f_add_students(data):
     print("Im in f_add_students!")
     print(data)
     first_name = data.get("firstName")
+    middle_name = data.get("middleName")
     last_name = data.get("lastName")
     sex = data.get("sex")
     age = data.get("age")
@@ -55,12 +56,12 @@ def f_add_students(data):
     
     try:        
         insert_query = """
-            INSERT INTO tblStudents (first_name, last_name, sex, age, grade_level, section_id, section_name, height_cm, weight_kg, bmi, bmi_measurement, measurement_date, teacher_id)
-                VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, JSON_ARRAY(%s), JSON_ARRAY(%s), JSON_ARRAY(CURRENT_DATE), %s)
+            INSERT INTO tblStudents (first_name, middle_name, last_name, sex, age, grade_level, section_id, section_name, height_cm, weight_kg, bmi, bmi_measurement, measurement_date, teacher_id)
+                VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, JSON_ARRAY(%s), JSON_ARRAY(%s), JSON_ARRAY(CURRENT_DATE), %s)
             ;
             """
 
-        record = (first_name, last_name, sex, age, grade, section_id, section, height, weight, bmi, bmiStatus, user_id)        
+        record = (first_name, middle_name, last_name, sex, age, grade, section_id, section, height, weight, bmi, bmiStatus, user_id)        
         # print(record)
 
         cursor.execute(insert_query, record)
@@ -329,21 +330,22 @@ def f_update_student_information(data):
     student_id = data.get("studentId")
     user_id = data.get("userId")
     first_name = data.get("firstName")
+    middle_name = data.get("middleName")
     last_name = data.get("lastName")
     sex = data.get("sex")
     age = data.get("age")
 
-    print(student_id, user_id, first_name, last_name, sex, age)
+    print(student_id, user_id, first_name, middle_name, last_name, sex, age)
 
     try:
     # UPDATE TASK
         update_query = """
             UPDATE tblStudents 
-            SET first_name=%s, last_name=%s, sex=%s, age=%s
+            SET first_name=%s, middle_name=%s, last_name=%s, sex=%s, age=%s
             WHERE student_id=%s AND teacher_id=%s
         """
         
-        cursor.execute(update_query, (first_name, last_name, sex, age, student_id, user_id))
+        cursor.execute(update_query, (first_name, middle_name, last_name, sex, age, student_id, user_id))
         mysqldb.commit()
     
         return { 'status': True }

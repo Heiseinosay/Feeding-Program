@@ -79,7 +79,7 @@ def f_me(user_id):
     mysqldb, cursor = connect_to_db()
     try:
         read_query = (
-            "SELECT teacher_id, first_name, last_name, email, mobile_no, is_first_login, school_name, created_at "
+            "SELECT teacher_id, first_name, middle_name, last_name, email, mobile_no, is_first_login, school_name, created_at "
             "FROM tblTeachers WHERE teacher_id = %s"
         )
         cursor.execute(read_query, (user_id,))
@@ -96,12 +96,13 @@ def f_me(user_id):
             "status": True,
             "id": result[0],
             "first_name": result[1],
-            "last_name": result[2],
-            "email": result[3],
-            "mobile_no": result[4],
-            "is_first_login": result[5],
-            "school_name": result[6],
-            "created_at": result[7]
+            "middle_name": result[2],
+            "last_name": result[3],
+            "email": result[4],
+            "mobile_no": result[5],
+            "is_first_login": result[6],
+            "school_name": result[7],
+            "created_at": result[8]
         }), 200
 
     except Error as e:
@@ -156,21 +157,22 @@ def f_auth_update_user_information(data):
     mysqldb, cursor = connect_to_db()
     print("Im in f_auth_update_user_information!")
     first_name = data.get('firstName')
+    middle_name = data.get('middleName')
     last_name = data.get('lastName')
     mobile_no = data.get('mobileNo')
     user_id = data.get('userId')
 
-    print(user_id, first_name, last_name, mobile_no)
+    print(user_id, first_name, middle_name, last_name, mobile_no)
 
     # return
     try:
     # UPDATE TASK
         update_query = """
             UPDATE tblTeachers 
-            SET first_name=%s, last_name=%s, mobile_no=%s
+            SET first_name=%s, middle_name=%s, last_name=%s, mobile_no=%s
             WHERE teacher_id=%s
         """
-        cursor.execute(update_query, (first_name, last_name, mobile_no, user_id))
+        cursor.execute(update_query, (first_name, middle_name, last_name, mobile_no, user_id))
         mysqldb.commit()
     
         return { 'status': True }

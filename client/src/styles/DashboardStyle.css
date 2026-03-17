@@ -326,6 +326,14 @@
   border: 1px solid #e5e7eb;
 }
 
+.dashboard-line-chart-card {
+  background-color: white;
+  border-radius: 1rem;
+  padding: 1.5rem;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 2rem;
+}
+
 .dashboard-chart-header {
   margin-bottom: 1.5rem;
 }

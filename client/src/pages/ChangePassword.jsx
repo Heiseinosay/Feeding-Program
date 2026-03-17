@@ -1,9 +1,10 @@
 // Packages
 import React from 'react'
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from 'axios';
 import { useNavigate } from "react-router";
+import { logout } from "../api";
 
 // Styles
 import "../styles/ChangePasswordStyle.css";
@@ -19,6 +20,29 @@ function ChangePassword() {
     const [showCurrentPassword, setShowCurrentPassword] = useState(false);
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+    useEffect(() => {
+        const handleBrowserBack = async () => {
+            const confirmBack = window.confirm(
+                `Ooops! You are leaving the Change Password page. Login with different account?`
+            );
+
+            if (!confirmBack) {
+                return;
+            }
+
+            await logout();
+            navigate("/login", { replace: true });
+        };
+
+        // Add a history entry so browser Back can be intercepted on this page
+        window.history.pushState({ changePasswordGuard: true }, "", window.location.href);
+        window.addEventListener("popstate", handleBrowserBack);
+
+        return () => {
+            window.removeEventListener("popstate", handleBrowserBack);
+        };
+    }, [navigate]);
 
     const [loading, setLoading] = useState(false);
     const toggleCurrentPassword = () => setShowCurrentPassword((prev) => !prev);

@@ -402,6 +402,7 @@ function Students() {
     const [rawStudents, setRawStudents] = useState([])
     const [formData, setFormData] = useState({
         firstName: "",
+        middleName: "",
         lastName: "",
         sex: "",
         age: "",
@@ -449,6 +450,19 @@ function Students() {
             return "Female";
         }
         return value || "";
+    };
+
+    const buildStudentFullName = (lastName, firstName, middleName) => {
+        const normalizedLast = String(lastName ?? "").trim();
+        const normalizedFirst = String(firstName ?? "").trim();
+        const normalizedMiddle = String(middleName ?? "").trim();
+        const firstAndMiddle = [normalizedFirst, normalizedMiddle].filter(Boolean).join(" ");
+
+        if (normalizedLast && firstAndMiddle) {
+            return `${normalizedLast}, ${firstAndMiddle}`;
+        }
+
+        return normalizedLast || firstAndMiddle;
     };
 
     const getLatestMeasurement = (value) => {
@@ -518,12 +532,20 @@ function Students() {
                 bmiMeasurement,
                 measurementDate,
                 programAttendance,
+                teacher_id,
+                school_name,
+                created_at,
+                updated_at,
+                middle_name
             ] = student;
 
-            const name = `${firstName || ""} ${lastName || ""}`.trim();
+            const name = buildStudentFullName(lastName, firstName, middle_name);
             return {
                 id: studentId ?? index + 1,
                 name,
+                firstName: firstName ?? "",
+                middleName: middle_name ?? "",
+                lastName: lastName ?? "",
                 age: age ?? "",
                 sex: formatSexLabel(sex),
                 height: heightCm ?? "",
@@ -556,12 +578,16 @@ function Students() {
         }
 
         const firstName = student.firstName ?? student.first_name ?? "";
+        const middleName = student.middleName ?? student.middle_name ?? "";
         const lastName = student.lastName ?? student.last_name ?? "";
-        const name = student.name ?? `${firstName} ${lastName}`.trim();
+        const name = student.name ?? buildStudentFullName(lastName, firstName, middleName);
 
         return {
             id: student.id ?? student.student_id ?? student.section_id ?? index + 1,
             name,
+            firstName,
+            middleName,
+            lastName,
             age: student.age ?? "",
             sex: formatSexLabel(student.sex),
             height: student.height ?? student.height_cm ?? "",
@@ -805,13 +831,40 @@ function Students() {
         ? sections.find((section) => section.id === measurementActiveSectionId) || null
         : null;
     const measurementSectionName = measurementSection?.name || "";
-    const measurementStudents = measurementSection
-        ? students.filter((student) => {
+    const measurementStudents = useMemo(() => {
+        if (!measurementSection) {
+            return [];
+        }
+
+        const sectionStudents = students.filter((student) => {
             const matchesId = student.sectionId && student.sectionId === measurementSection.id;
             const matchesName = measurementSectionName && student.section === measurementSectionName;
             return matchesId || matchesName;
-        })
-        : [];
+        });
+
+        const getLastNameForSort = (student) => {
+            const explicitLastName = String(student?.lastName ?? "").trim();
+            if (explicitLastName) {
+                return explicitLastName.toLowerCase();
+            }
+
+            const fullName = String(student?.name ?? "").trim();
+            const commaIndex = fullName.indexOf(",");
+            if (commaIndex >= 0) {
+                return fullName.slice(0, commaIndex).trim().toLowerCase();
+            }
+
+            return fullName.toLowerCase();
+        };
+
+        return sectionStudents.sort((left, right) => {
+            const byLastName = getLastNameForSort(left).localeCompare(getLastNameForSort(right));
+            if (byLastName !== 0) {
+                return byLastName;
+            }
+            return String(left?.name ?? "").localeCompare(String(right?.name ?? ""));
+        });
+    }, [measurementSection, measurementSectionName, students]);
 
     useEffect(() => {
         if (!measurementOpen) {
@@ -1639,10 +1692,11 @@ function Students() {
         // bmiStatus = "overweight";
         // }
         
-        const studentName = `${formData.firstName} ${formData.lastName}`;
+        const studentName = buildStudentFullName(formData.lastName, formData.firstName, formData.middleName);
         
         const payload = {
         firstName: formData.firstName.trim(),
+        middleName: formData.middleName.trim(),
         lastName: formData.lastName.trim(),
         sex: formData.sex,
         age: parseInt(formData.age),
@@ -1700,6 +1754,7 @@ function Students() {
     const handleClear = () => {
         setFormData({
         firstName: "",
+        middleName: "",
         lastName: "",
         sex: "",
         age: "",
@@ -1726,14 +1781,14 @@ function Students() {
         if (!student) {
             return;
         }
-
-        const nameParts = String(student.name || "").trim().split(/\s+/);
-        const firstName = nameParts[0] || "";
-        const lastName = nameParts.slice(1).join(" ");
+        const firstName = student.firstName ?? "";
+        const middleName = student.middleName ?? student.middle_name ?? "";
+        const lastName = student.lastName ?? "";
         const sexValue = student.sex === "Male" ? "M" : student.sex === "Female" ? "F" : "";
 
         setFormData({
             firstName,
+            middleName,
             lastName,
             sex: sexValue,
             age: student.age ?? "",
@@ -1768,6 +1823,7 @@ function Students() {
             studentId: editingStudentMeta.studentId,
             userId: editingStudentMeta.userId,
             firstName: formData.firstName.trim(),
+            middleName: formData.middleName.trim(),
             lastName: formData.lastName.trim(),
             sex: formData.sex,
             age: Number(formData.age),
@@ -1782,7 +1838,7 @@ function Students() {
                 return;
             }
 
-            const fullName = `${formData.firstName} ${formData.lastName}`.trim();
+            const fullName = buildStudentFullName(formData.lastName, formData.firstName, formData.middleName);
             const sexLabel = formData.sex === "M" ? "Male" : formData.sex === "F" ? "Female" : "";
 
             setStudents((prev) =>
@@ -1791,6 +1847,9 @@ function Students() {
                         ? {
                             ...student,
                             name: fullName || student.name,
+                            firstName: formData.firstName.trim() || student.firstName,
+                            middleName: formData.middleName.trim(),
+                            lastName: formData.lastName.trim() || student.lastName,
                             age: formData.age || student.age,
                             sex: sexLabel || student.sex,
                         }
@@ -3182,6 +3241,18 @@ function Students() {
                     {formErrors.firstName && (
                         <span className="students-form-error">{formErrors.firstName}</span>
                     )}
+                    </div>
+
+                    <div className="students-form-field">
+                    <label className="students-form-label">Middle Name</label>
+                    <input
+                        type="text"
+                        name="middleName"
+                        value={formData.middleName}
+                        onChange={handleInputChange}
+                        className="students-form-input"
+                        placeholder="Enter middle name (optional)"
+                    />
                     </div>
 
                     <div className="students-form-field">
