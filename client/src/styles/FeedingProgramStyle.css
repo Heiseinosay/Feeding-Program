@@ -512,6 +512,10 @@
   margin-top: -0.25rem;
 }
 
+.feeding-form-warning {
+  color: #b45309;
+}
+
 .feeding-form-error {
   font-size: 0.75rem;
   color: #ef4444;
@@ -536,9 +540,17 @@
   color: #374151;
 }
 
+.feeding-checkbox-item.is-disabled {
+  color: #9ca3af;
+}
+
 .feeding-checkbox-item input {
   width: 1rem;
   height: 1rem;
+}
+
+.feeding-checkbox-item input:disabled {
+  cursor: not-allowed;
 }
 
 .feeding-form-actions {
@@ -942,6 +954,13 @@
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 0.75rem;
+}
+
+.feeding-attendance-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .feeding-attendance-summary {

@@ -5,6 +5,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 
 // PAGES
 import Login from './pages/Login';
+import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
 import ChangePassword from './pages/ChangePassword';
 import Students from './pages/Students';
@@ -18,6 +19,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/login" />} />
           <Route path="/login" element={<Login />}></Route>
+          <Route path="/forgot-password" element={<ForgotPassword />}></Route>
           <Route path="/profile" element={<Profile />}></Route>
           <Route path="/dashboard" element={<Dashboard />}></Route>
           <Route path="/ChangePassword/:userMail/:uid" element={<ChangePassword />}></Route>

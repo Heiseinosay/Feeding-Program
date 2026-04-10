@@ -15,10 +15,11 @@ from flask_jwt_extended import (
 
 from dbutils import connect_to_db
 from auth import f_auth_login, f_me, f_auth_first_update_password, f_auth_update_user_information
-from students import f_get_all_students, f_add_students, f_add_students_attendance, f_delete_student, f_update_bmi_measurement, f_update_student_information, f_get_student_attendance, f_update_student_measurement_targeted
+from students import f_get_all_students, f_add_students, f_add_students_attendance, f_delete_student, f_update_bmi_measurement, f_update_student_information, f_get_student_attendance, f_update_student_measurement_targeted, f_get_all_student_attendance
 from section import f_add_section, f_get_all_section, f_delete_section, f_update_section
 from session import f_get_all_session, f_add_session, f_set_cancel_session, f_set_complete_session, f_delete_session, f_update_session_information, f_get_nearest_upcoming_session, f_get_total_completed_session
-from charts import f_get_all_status_count, f_get_bmi_trend
+from charts import f_get_all_status_count, f_get_bmi_trend, nutribot_database
+from nutribot_intent import prompt_message
 
 # to run python -m flask run
 
@@ -48,6 +49,15 @@ CORS(
 
 # Initialize JWT extension
 jwt = JWTManager(app)
+
+
+#** DEPLOYMENT TEST ==================================================================
+@app.get("/api/health")
+def health_check():
+    return jsonify({
+        "status": True,
+        "message": "Server is running"
+    }), 200
 
 
 #** AUTHENTICATION WITH JWT ==================================================================
@@ -206,11 +216,20 @@ def update_student_information():
     return jsonify(res)
 
 
-# Fetch all students attendance
+# Fetch specific students attendance
 @app.route("/api/get_student_attendance", methods=["GET"])
 def get_student_attendance():
     student_id = request.args.get("studentId")
     res = f_get_student_attendance(student_id)
+    print(res)
+    return res
+
+
+# Fetch all students attendance
+@app.route("/api/get_all_student_attendance", methods=["GET"])
+def get_all_student_attendance():
+    user_id = request.args.get("userId")
+    res = f_get_all_student_attendance(user_id)
     print(res)
     return res
 
@@ -222,6 +241,8 @@ def update_student_measurement_targeted():
     res = f_update_student_measurement_targeted(data)
     print(res)
     return jsonify(res)
+
+
 
 
 #** SESSION PROCESS ==================================================================
@@ -298,8 +319,6 @@ def get_total_completed_session():
 
 
 
-
-
 #** ANALYSIS  ==================================================================
 # Fetch all aggreggated total students by status
 @app.route("/api/get_all_status_count", methods=["GET"])
@@ -318,6 +337,40 @@ def get_bmi_trend():
     print(res)
     return res
 
+
+##* AI BOT ==================================================================
+# SEND MESSAGE
+@app.route("/api/nutribot_send", methods=["GET"])
+def get_nutribot_send():
+    prompt = request.args.get("message", "")
+    teacher_id = request.args.get("teacherId")
+    if teacher_id is None or not str(teacher_id).strip().isdigit():
+        return {
+            "status": False,
+            "message": "Unable to identify the current teacher for this NutriBot request.",
+        }
+
+    query_payload = prompt_message(prompt, teacher_id=teacher_id)
+    if query_payload is None:
+        return {
+            "status": False,
+            "message": "Sorry, I did not understand that request. Try asking about at-risk students, BMI history, or type 'What can you do?'",
+        }
+
+    if query_payload['intent'] == "show_nutribot_capabilities":
+        return {
+            "intent": query_payload['intent'],
+            "status": True,
+            "message": query_payload['capabilities']
+        }
+
+    res = nutribot_database(query_payload)
+
+    return {
+        "intent": query_payload['intent'],
+        "status": res.get("status", False),
+        "res": res,
+    } or {}
 
 
 

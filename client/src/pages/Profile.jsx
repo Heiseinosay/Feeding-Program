@@ -48,7 +48,7 @@ export default function Profile() {
         return;
       }
       if (data?.status) {
-        console.log(data)
+        // console.log(data)
         setUser(data);
       } else {
         navigate("/");
@@ -75,6 +75,7 @@ export default function Profile() {
   const [formErrors, setFormErrors] = useState({});
   const [isEdited, setIsEdited] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
   // Profile photo state
   const [profileImage, setProfileImage] = useState(null);
@@ -87,8 +88,16 @@ export default function Profile() {
   // Toast notification state
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
+  const [toastTitle, setToastTitle] = useState("Success!");
 
-  const triggerToast = (message) => {
+  const revokeObjectUrl = (url) => {
+    if (typeof url === "string" && url.startsWith("blob:")) {
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const triggerToast = (message, title = "Success!") => {
+    setToastTitle(title);
     setToastMessage(message);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 3000);
@@ -103,8 +112,14 @@ export default function Profile() {
     setFormData(next);
     setOriginalFormData(next);
     setFormErrors({});
-    setIsEdited(false);
   }, [user]);
+
+  useEffect(() => {
+    const hasChanges = Object.keys(formData).some(
+      (key) => formData[key] !== originalFormData[key]
+    );
+    setIsEdited(hasChanges);
+  }, [formData, originalFormData]);
 
 
   // GET ALL SECTION
@@ -121,7 +136,7 @@ export default function Profile() {
         })
         .then((response) => {
             const data = response.data;
-            console.log(data)
+            // console.log(data)
             if (!data?.status) {
                 setSections([]);
                 return;
@@ -174,7 +189,6 @@ export default function Profile() {
       ...prev,
       [name]: value,
     }));
-    setIsEdited(true);
 
     // Clear error for this field
     if (formErrors[name]) {
@@ -190,10 +204,7 @@ export default function Profile() {
     const errors = {};
     const firstName = String(formData.firstName || "").trim();
     const middleName = String(formData.middleName || "").trim();
-    const lastName = String(formData.lastName || "").trim();
     const mobile = String(formData.mobile || "").trim();
-    const schoolName = String(formData.schoolName || "").trim();
-    const email = String(formData.email || "").trim();
     const lettersOnlyPattern = /^[A-Za-z\s]+$/;
 
     if (!firstName) {
@@ -206,16 +217,6 @@ export default function Profile() {
     } else if (!lettersOnlyPattern.test(middleName)) {
       errors.middleName = "Middle name must contain letters only.";
     }
-    if (!lastName) {
-      errors.lastName = "Last name is required";
-    } else if (!lettersOnlyPattern.test(lastName)) {
-      errors.lastName = "Last name must contain letters only.";
-    }
-    if (!email) {
-      errors.email = "Email is required";
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
-      errors.email = "Please enter a valid email address";
-    }
     if (!mobile) {
       errors.mobile = "Mobile number is required";
     } else if (!/^\d+$/.test(mobile)) {
@@ -223,9 +224,7 @@ export default function Profile() {
     } else if (mobile.length !== 11) {
       errors.mobile = "Mobile number must be exactly 11 digits.";
     }
-    if (!schoolName) {
-      errors.schoolName = "School name is required";
-    }
+
 
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -271,10 +270,9 @@ export default function Profile() {
           mobile: payload.mobileNo,
         };
 
-        console.log(nextFormData)
+        // console.log(nextFormData)
         setFormData(nextFormData);
         setOriginalFormData(nextFormData);
-        setIsEdited(false);
         setUser((prev) => ({
           ...(prev || {}),
           first_name: payload.firstName,
@@ -297,7 +295,6 @@ export default function Profile() {
   const handleCancel = () => {
     setFormData({ ...originalFormData });
     setFormErrors({});
-    setIsEdited(false);
   };
 
   // Handle file upload
@@ -333,16 +330,40 @@ export default function Profile() {
 
   // Create cropped image
   const createCroppedImage = async () => {
+    if (!imageToCrop || !croppedAreaPixels || isUploadingPhoto) {
+      return;
+    }
+
+    let nextPreviewUrl = null;
     try {
-      const croppedImage = await getCroppedImg(
+      setIsUploadingPhoto(true);
+      const { blob, previewUrl } = await getCroppedImg(
         imageToCrop,
         croppedAreaPixels
       );
-      setProfileImage(croppedImage);
+      nextPreviewUrl = previewUrl;
+      if (!blob) {
+        throw new Error("Failed to process profile photo.");
+      }
+      setProfileImage((prev) => {
+        revokeObjectUrl(prev);
+        return previewUrl;
+      });
       setShowCropper(false);
+      setImageToCrop(null);
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
+      setCroppedAreaPixels(null);
       triggerToast("Profile photo updated successfully!");
     } catch (e) {
       console.error(e);
+      revokeObjectUrl(nextPreviewUrl);
+      triggerToast(
+        e?.message || "Failed to process profile photo.",
+        "Upload Failed"
+      );
+    } finally {
+      setIsUploadingPhoto(false);
     }
   };
 
@@ -356,6 +377,7 @@ export default function Profile() {
 
   // Remove profile photo
   const handleRemovePhoto = () => {
+    revokeObjectUrl(profileImage);
     setProfileImage(null);
     triggerToast("Profile photo removed");
   };
@@ -583,9 +605,8 @@ export default function Profile() {
                       type="text"
                       name="lastName"
                       value={formData.lastName}
-                      onChange={handleInputChange}
                       className={`profile-form-input ${
-                        formErrors.schoolName ? "error" : ""
+                        formErrors.lastName ? "error" : ""
                       }`}
                       placeholder="Enter last name"
                       disabled
@@ -605,7 +626,6 @@ export default function Profile() {
                       type="text"
                       name="schoolName"
                       value={formData.schoolName}
-                      onChange={handleInputChange}
                       className={`profile-form-input ${
                         formErrors.schoolName ? "error" : ""
                       }`}
@@ -627,7 +647,6 @@ export default function Profile() {
                       type="email"
                       name="email"
                       value={formData.email}
-                      onChange={handleInputChange}
                       className={`profile-form-input ${
                         formErrors.email ? "error" : ""
                       }`}
@@ -980,8 +999,9 @@ export default function Profile() {
               <button
                 className="profile-button-primary"
                 onClick={createCroppedImage}
+                disabled={isUploadingPhoto}
               >
-                Apply
+                {isUploadingPhoto ? "Uploading..." : "Apply"}
               </button>
             </div>
           </div>
@@ -1005,7 +1025,7 @@ export default function Profile() {
             />
           </svg>
           <div className="profile-toast-content">
-            <h3 className="profile-toast-title">Success!</h3>
+            <h3 className="profile-toast-title">{toastTitle}</h3>
             <p className="profile-toast-message">{toastMessage}</p>
           </div>
           <button
@@ -1057,8 +1077,10 @@ const getCroppedImg = (imageSrc, pixelCrop) => {
           reject(new Error("Canvas is empty"));
           return;
         }
-        const fileUrl = URL.createObjectURL(blob);
-        resolve(fileUrl);
+        resolve({
+          blob,
+          previewUrl: URL.createObjectURL(blob),
+        });
       }, "image/jpeg");
     };
     image.onerror = () => {

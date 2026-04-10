@@ -152,3 +152,25 @@ def f_get_bmi_trend(user_id):
         return { 'status': False }
     finally:
         mysqldb.close()
+
+
+def nutribot_database(sql):
+    mysqldb, cursor = connect_to_db()
+    print("Im in nutribot_database!")
+    try:
+        read_query = sql["sql"]
+        params = sql["params"]
+        tuple_params = (*params,)
+        print(params)
+        cursor.execute(read_query, tuple_params)
+        result = cursor.fetchall()
+
+        return { 
+                'status': True,
+                'Summary': result 
+            }
+    except Error as e:
+        print(f"error on accessing database: {e}")
+        return { 'status': False }
+    finally:
+        mysqldb.close()

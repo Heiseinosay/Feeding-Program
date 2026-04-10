@@ -179,6 +179,57 @@ const getPhilippineHolidayByISO = (iso) => {
   return buildPhilippineHolidayMap(year).get(raw) || null;
 };
 
+const parseLatestBmiStatus = (value) => {
+  let parsed = value;
+
+  if (typeof parsed === "string") {
+    const raw = parsed.trim();
+    if (!raw) {
+      return "";
+    }
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      parsed = raw;
+    }
+  }
+
+  if (Array.isArray(parsed)) {
+    parsed = parsed.length ? parsed[parsed.length - 1] : "";
+  }
+
+  if (typeof parsed === "string") {
+    const raw = parsed.trim();
+    if (raw.startsWith('"') && raw.endsWith('"')) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch (error) {
+        parsed = raw.slice(1, -1);
+      }
+    } else {
+      parsed = raw;
+    }
+  }
+
+  return String(parsed ?? "")
+    .trim()
+    .replace(/^"+|"+$/g, "")
+    .toLowerCase();
+};
+
+const buildStudentFullName = (lastName, firstName, middleName) => {
+  const normalizedLast = String(lastName ?? "").trim();
+  const normalizedFirst = String(firstName ?? "").trim();
+  const normalizedMiddle = String(middleName ?? "").trim();
+  const firstAndMiddle = [normalizedFirst, normalizedMiddle].filter(Boolean).join(" ");
+
+  if (normalizedLast && firstAndMiddle) {
+    return `${normalizedLast}, ${firstAndMiddle}`;
+  }
+
+  return normalizedLast || firstAndMiddle;
+};
+
 
 // ==============================
 // Component
@@ -256,6 +307,15 @@ function FeedingProgram() {
   const [attendanceActiveSectionId, setAttendanceActiveSectionId] = useState("");
   const [isSavingAttendance, setIsSavingAttendance] = useState(false);
   const [attendanceSavedSections, setAttendanceSavedSections] = useState({});
+  const attendanceRemarkOptions = [
+    "Ate full meal",
+    "Ate partially",
+    "Absent that day",
+    "Sick",
+    "overweight",
+    "normal",
+    "any",
+  ];
   const [deletingSessionIds, setDeletingSessionIds] = useState({});
   const [isSavingSessionSubmit, setIsSavingSessionSubmit] = useState(false);
   const [sessionDetailsId, setSessionDetailsId] = useState(null);
@@ -331,33 +391,106 @@ function FeedingProgram() {
       m.get(key).push(stu);
     });
     // Sort per section
-    m.forEach((arr) => arr.sort((a, b) => a.full_name.localeCompare(b.full_name)));
+    m.forEach((arr) =>
+      arr.sort((a, b) => {
+        const byLastName = String(a.last_name ?? "").localeCompare(String(b.last_name ?? ""), undefined, { sensitivity: "base" });
+        if (byLastName !== 0) {
+          return byLastName;
+        }
+
+        return String(a.full_name ?? "").localeCompare(String(b.full_name ?? ""), undefined, { sensitivity: "base" });
+      })
+    );
     return m;
   }, [students, sections]);
 
   const isEditing = Boolean(editingSessionId);
-
-  const selectedSession = useMemo(() => {
-    if (!editingSessionId) return null;
-    return sessions.find((s) => s.session_id === editingSessionId) || null;
-  }, [sessions, editingSessionId]);
 
   const sessionDetails = useMemo(() => {
     if (!sessionDetailsId) return null;
     return sessions.find((s) => s.session_id === sessionDetailsId) || null;
   }, [sessions, sessionDetailsId]);
 
-  // Week-blocking: one session per Mon–Fri week
-  const weekHasSession = useMemo(() => {
-    // map weekKey -> session_ids (all sessions, not only month)
+  const sectionsScheduledByWeek = useMemo(() => {
     const map = new Map();
     sessions.forEach((s) => {
+      if (!s?.date) {
+        return;
+      }
+
       const wk = weekKeyMon(fromISODate(s.date));
-      if (!map.has(wk)) map.set(wk, []);
-      map.get(wk).push(s.session_id);
+      if (!map.has(wk)) {
+        map.set(wk, new Map());
+      }
+
+      const sectionMap = map.get(wk);
+      (s.section_ids || []).forEach((sectionId) => {
+        const normalizedSectionId = String(sectionId);
+        if (!sectionMap.has(normalizedSectionId)) {
+          sectionMap.set(normalizedSectionId, new Set());
+        }
+        sectionMap.get(normalizedSectionId).add(s.session_id);
+      });
     });
     return map;
   }, [sessions]);
+
+  const weeklySectionConflictIds = useMemo(() => {
+    const iso = String(form.date || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+      return new Set();
+    }
+
+    const weekSections = sectionsScheduledByWeek.get(weekKeyMon(fromISODate(iso)));
+    if (!weekSections) {
+      return new Set();
+    }
+
+    const conflicts = new Set();
+    weekSections.forEach((sessionIds, sectionId) => {
+      const blockedByAnotherSession = Array.from(sessionIds).some((sessionId) => {
+        return !(isEditing && String(sessionId) === String(editingSessionId));
+      });
+
+      if (blockedByAnotherSession) {
+        conflicts.add(String(sectionId));
+      }
+    });
+
+    return conflicts;
+  }, [form.date, sectionsScheduledByWeek, isEditing, editingSessionId]);
+
+  const weeklyConflictingSections = useMemo(() => {
+    if (!weeklySectionConflictIds.size) {
+      return [];
+    }
+
+    const labels = [];
+    const seen = new Set();
+
+    sections.forEach((sec) => {
+      const sectionId = String(sec.section_id);
+      if (!weeklySectionConflictIds.has(sectionId) || seen.has(sectionId)) {
+        return;
+      }
+
+      const gradeLabel = sec.grade ?? sec.grade_level ?? "";
+      const nameLabel = sec.name ?? sec.section_name ?? "";
+      labels.push({
+        id: sectionId,
+        label: `${gradeLabel} - ${nameLabel}`,
+      });
+      seen.add(sectionId);
+    });
+
+    return labels;
+  }, [sections, weeklySectionConflictIds]);
+
+  const conflictingSelectedSectionIds = useMemo(() => {
+    return (form.section_ids || [])
+      .map((sectionId) => String(sectionId))
+      .filter((sectionId) => weeklySectionConflictIds.has(sectionId));
+  }, [form.section_ids, weeklySectionConflictIds]);
 
   // ==========================
   // Effects
@@ -434,19 +567,40 @@ function FeedingProgram() {
               ,
               ,
               sectionId,
+              ,
+              ,
+              ,
+              ,
+              bmiMeasurement,
+              ,
+              ,
+              ,
+              ,
+              ,
+              ,
+              middleName,
             ] = stu;
             return {
               student_id: studentId ?? index,
-              full_name: `${firstName || ""} ${lastName || ""}`.trim(),
+              full_name: buildStudentFullName(lastName, firstName, middleName),
+              first_name: String(firstName ?? "").trim(),
+              middle_name: String(middleName ?? "").trim(),
+              last_name: String(lastName ?? "").trim(),
               section_id: String(sectionId ?? ""),
+              bmi_status: parseLatestBmiStatus(bmiMeasurement),
             };
           }
           const firstName = stu?.first_name ?? stu?.firstName ?? "";
+          const middleName = stu?.middle_name ?? stu?.middleName ?? "";
           const lastName = stu?.last_name ?? stu?.lastName ?? "";
           return {
             student_id: stu?.student_id ?? stu?.id ?? index,
-            full_name: `${firstName} ${lastName}`.trim(),
+            full_name: buildStudentFullName(lastName, firstName, middleName),
+            first_name: String(firstName).trim(),
+            middle_name: String(middleName).trim(),
+            last_name: String(lastName).trim(),
             section_id: String(stu?.section_id ?? stu?.sectionId ?? ""),
+            bmi_status: parseLatestBmiStatus(stu?.bmi_measurement ?? stu?.bmiStatus ?? stu?.bmi_status ?? ""),
           };
         });
         setStudents(normalized);
@@ -455,6 +609,66 @@ function FeedingProgram() {
       .catch((error) => {
         console.error("Fetching students error:", error);
         setStudents([]);
+      });
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    axios
+      .get("/api/get_all_student_attendance", {
+        params: {
+          userId: user.id,
+        },
+      })
+      .then((response) => {
+        const data = response.data;
+        if (!data?.status) {
+          console.warn("Fetching all student attendance failed:", data);
+          return;
+        }
+
+        const rows = Array.isArray(data.studentsAttendance) ? data.studentsAttendance : [];
+        const attendanceMap = {};
+        const savedSectionsMap = {};
+
+        rows.forEach((row) => {
+          if (!Array.isArray(row) || row.length < 5) {
+            return;
+          }
+
+          const studentId = row[0];
+          const sessionId = row[1];
+          const sectionId = String(row[2] ?? "");
+          const present = Number(row[3]) === 1 ? 1 : 0;
+          const remarks = String(row[4] ?? "");
+
+          if (!sessionId || !studentId) {
+            return;
+          }
+
+          if (!attendanceMap[sessionId]) {
+            attendanceMap[sessionId] = {};
+          }
+          attendanceMap[sessionId][studentId] = {
+            present,
+            remarks,
+          };
+
+          if (!savedSectionsMap[sessionId]) {
+            savedSectionsMap[sessionId] = new Set();
+          }
+          if (sectionId) {
+            savedSectionsMap[sessionId].add(sectionId);
+          }
+        });
+
+        setAttendanceBySession(attendanceMap);
+        setAttendanceSavedSections(savedSectionsMap);
+        console.log("All students attendance:", rows);
+      })
+      .catch((error) => {
+        console.error("Fetching all student attendance error:", error);
       });
   }, [user?.id]);
 
@@ -615,15 +829,22 @@ function FeedingProgram() {
 
   const toggleSectionInForm = (sectionId) => {
     setForm((prev) => {
-      const exists = prev.section_ids.includes(sectionId);
-      const next = exists ? prev.section_ids.filter((x) => x !== sectionId) : [...prev.section_ids, sectionId];
+      const normalizedSectionId = String(sectionId);
+      const exists = prev.section_ids.some((value) => String(value) === normalizedSectionId);
+      if (!exists && weeklySectionConflictIds.has(normalizedSectionId)) {
+        return prev;
+      }
+
+      const next = exists
+        ? prev.section_ids.filter((value) => String(value) !== normalizedSectionId)
+        : [...prev.section_ids, normalizedSectionId];
       return { ...prev, section_ids: next };
     });
 
     setFormErrors((prev) => ({ ...prev, section_ids: "" }));
   };
 
-  const validateSessionForm = () => {
+  const validateSectionScopedSessionForm = () => {
     const errors = {};
     const iso = String(form.date || "").trim();
 
@@ -638,22 +859,17 @@ function FeedingProgram() {
       } else if (holiday) {
         errors.date = `The chosen date is a holiday (${holiday.name}). Please select another date.`;
       } else if (!isWeekday(d)) {
-        errors.date = "Only weekdays (Mon–Fri) are allowed.";
-      } else {
-        // Enforce one session per week
-        const wk = weekKeyMon(d);
-        const ids = weekHasSession.get(wk) || [];
-        const blockedByOther =
-          ids.length > 0 && !(isEditing && ids.length === 1 && ids[0] === editingSessionId) && !(isEditing && ids.includes(editingSessionId));
-
-        if (blockedByOther) {
-          errors.date = "A session already exists in that week (Mon–Fri). Please choose another week.";
-        }
+        errors.date = "Only weekdays (Mon-Fri) are allowed.";
       }
     }
 
     if (!form.section_ids || form.section_ids.length === 0) {
       errors.section_ids = "Please select at least one section.";
+    } else if (conflictingSelectedSectionIds.length > 0) {
+      const conflictingLabels = conflictingSelectedSectionIds
+        .map((sectionId) => weeklyConflictingSections.find((sec) => sec.id === sectionId)?.label || sectionId)
+        .join(", ");
+      errors.section_ids = `These sections already have a session scheduled in the same week: ${conflictingLabels}.`;
     }
 
     setFormErrors(errors);
@@ -679,7 +895,7 @@ function FeedingProgram() {
 
   const handleSaveSession = () => {
     if (isSavingSessionSubmit) return;
-    if (!validateSessionForm()) return;
+    if (!validateSectionScopedSessionForm()) return;
 
     const payload = {
       userId: user.id,
@@ -695,14 +911,13 @@ function FeedingProgram() {
 
     if (!isEditing) {
       setIsSavingSessionSubmit(true);
-      // NOTE: Validate week-blocking on backend too
       axios
         .post("/api/add_session", payload)
         .then((response) => {
           console.log("add_session:", response.data);
           const status = response.data?.status;
           if (!status) {
-            alert("Something went wrong. Try again later!");
+            alert(response.data?.message || "Something went wrong. Try again later!");
             return;
           }
 
@@ -745,7 +960,7 @@ function FeedingProgram() {
       .then((response) => {
         const status = response.data?.status;
         if (!status) {
-          alert("Something went wrong. Try again later!");
+          alert(response.data?.message || "Something went wrong. Try again later!");
           return;
         }
 
@@ -963,6 +1178,14 @@ function FeedingProgram() {
     return studentsBySection.get(attendanceActiveSectionId) || [];
   }, [attendanceActiveSectionId, studentsBySection]);
 
+  const underweightStudentsCurrentSection = useMemo(
+    () =>
+      attendanceStudentsCurrentSection.filter(
+        (stu) => parseLatestBmiStatus(stu?.bmi_status) === "underweight"
+      ),
+    [attendanceStudentsCurrentSection]
+  );
+
   const computeAttendanceCounts = (sessionId, sectionId) => {
     const session = sessions.find((s) => s.session_id === sessionId);
     if (!session) return { present: 0, absent: 0, total: 0 };
@@ -996,6 +1219,27 @@ function FeedingProgram() {
     });
   };
 
+  const markUnderweightPresent = () => {
+    if (!attendanceSessionId || !attendanceActiveSectionId) return;
+    if (!underweightStudentsCurrentSection.length) return;
+
+    setAttendanceBySession((prev) => {
+      const current = prev[attendanceSessionId] || {};
+      const next = { ...current };
+      const underweightIds = new Set(underweightStudentsCurrentSection.map((stu) => stu.student_id));
+
+      attendanceStudentsCurrentSection.forEach((stu) => {
+        const isUnderweight = underweightIds.has(stu.student_id);
+        next[stu.student_id] = {
+          ...(next[stu.student_id] || { present: 1, remarks: "" }),
+          present: isUnderweight ? 1 : 0,
+        };
+      });
+
+      return { ...prev, [attendanceSessionId]: next };
+    });
+  };
+
   //* ATTENDANCE FUNCTION
   const togglePresent = (studentId) => {
     if (!attendanceSessionId) return;
@@ -1022,10 +1266,14 @@ function FeedingProgram() {
   };
 
   const saveAttendance = () => {
-    // TODO: Attendance Should be ineditable. If attendance was already listed on a session the attendance button should be dissabled.
     if (isSavingAttendance) return;
     if (!attendanceSessionId || !attendanceSession) {
       closeAttendance();
+      return;
+    }
+
+    if (!attendanceStudentsCurrentSection.length) {
+      alert("Cannot save attendance for empty section.");
       return;
     }
 
@@ -1493,7 +1741,7 @@ function FeedingProgram() {
                       </svg>
                     </button>
                   </div>
-                  <p>Choose one weekday (Mon–Fri). One session per week.</p>
+                  <p>Choose one weekday (Mon-Fri). Multiple sessions per week are allowed, but each section can only appear once per week.</p>
                 </div>
 
                 <div className="feeding-form">
@@ -1530,15 +1778,21 @@ function FeedingProgram() {
                     </div>
                   ) : (
                     sections.map((sec) => {
-                      const checked = form.section_ids.includes(sec.section_id);
+                      const sectionId = String(sec.section_id);
+                      const checked = form.section_ids.some((value) => String(value) === sectionId);
+                      const blockedForWeek = weeklySectionConflictIds.has(sectionId);
                       const gradeLabel = sec.grade ?? sec.grade_level ?? "";
                       const nameLabel = sec.name ?? sec.section_name ?? "";
                       return (
-                        <label key={sec.section_id} className="feeding-checkbox-item">
+                        <label
+                          key={sec.section_id}
+                          className={`feeding-checkbox-item ${blockedForWeek && !checked ? "is-disabled" : ""}`}
+                        >
                           <input
                             type="checkbox"
                             checked={checked}
-                            onChange={() => toggleSectionInForm(sec.section_id)}
+                            disabled={blockedForWeek && !checked}
+                            onChange={() => toggleSectionInForm(sectionId)}
                           />
                           <span>{gradeLabel} - {nameLabel}</span>
                         </label>
@@ -1547,6 +1801,11 @@ function FeedingProgram() {
                   )}
                 </div>
 
+                  {weeklyConflictingSections.length ? (
+                    <div className="feeding-form-hint feeding-form-warning">
+                      Already included in a session this week: {weeklyConflictingSections.map((sec) => sec.label).join(", ")}.
+                    </div>
+                  ) : null}
                   {formErrors.section_ids ? <div className="feeding-form-error">{formErrors.section_ids}</div> : null}
                 </div>
 
@@ -1620,7 +1879,7 @@ function FeedingProgram() {
                 <div className="feeding-rule-box">
                   <div className="feeding-rule-title">Rules (MVP)</div>
                   <ul>
-                    <li>Exactly 1 feeding session per week (Mon–Fri).</li>
+                    <li>Multiple sessions per week are allowed, but each section can only appear once.</li>
                     <li>Weekdays only; past dates blocked.</li>
                     <li>Attendance stored per session and student.</li>
                   </ul>
@@ -1753,9 +2012,19 @@ function FeedingProgram() {
               </div>
 
               <div className="feeding-attendance-actions">
-                <button className="feeding-action-btn" onClick={markAllPresent} type="button" disabled={activeSectionSaved}>
-                  Mark all present
-                </button>
+                <div className="feeding-attendance-action-buttons">
+                  <button className="feeding-action-btn" onClick={markAllPresent} type="button" disabled={activeSectionSaved}>
+                    Mark all present
+                  </button>
+                  <button
+                    className="feeding-action-btn subtle"
+                    onClick={markUnderweightPresent}
+                    type="button"
+                    disabled={activeSectionSaved || !underweightStudentsCurrentSection.length}
+                  >
+                    Mark all underweight present
+                  </button>
+                </div>
                 <div className="feeding-attendance-summary">
                   {attendanceSessionId && attendanceActiveSectionId ? (() => {
                     const c = computeAttendanceCounts(attendanceSessionId, attendanceActiveSectionId);
@@ -1779,7 +2048,7 @@ function FeedingProgram() {
                 {attendanceStudentsCurrentSection.length === 0 ? (
                   <div className="feeding-empty small">
                     <h3>No students</h3>
-                    <p>This section has no students in dummy data.</p>
+                    <p>This section has no students.</p>
                   </div>
                 ) : (
                   attendanceStudentsCurrentSection.map((stu) => {
@@ -1800,14 +2069,19 @@ function FeedingProgram() {
                         </div>
 
                         <div>
-                          <input
-                            type="text"
+                          <select
                             className="feeding-remarks-input"
                             value={rec.remarks}
                             onChange={(e) => updateRemarks(stu.student_id, e.target.value)}
-                            placeholder="Optional remarks"
                             disabled={activeSectionSaved}
-                          />
+                          >
+                            <option value="">None</option>
+                            {attendanceRemarkOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                     );
@@ -1821,7 +2095,12 @@ function FeedingProgram() {
                 Close
               </button>
               {!activeSectionSaved ? (
-                <button className="feeding-form-button primary" onClick={saveAttendance} type="button" disabled={isSavingAttendance}>
+                <button
+                  className="feeding-form-button primary"
+                  onClick={saveAttendance}
+                  type="button"
+                  disabled={isSavingAttendance}
+                >
                   {isSavingAttendance ? "Saving..." : "Save attendance"}
                 </button>
               ) : null}

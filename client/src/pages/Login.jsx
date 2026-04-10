@@ -155,9 +155,13 @@ function Login() {
                   <label htmlFor="password" className="form-label">
                     Password
                   </label>
-                  <a href="#" className="forgot-link">
+                  <button
+                    type="button"
+                    className="forgot-link login-link-button"
+                    onClick={() => navigate("/forgot-password")}
+                  >
                     Forgot password?
-                  </a>
+                  </button>
                 </div>
                 <div className="password-input-wrapper">
                   <input

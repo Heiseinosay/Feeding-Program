@@ -66,7 +66,7 @@ function Students() {
     const handleAddSection = () => {
         const sectionName = addSectionForm.name.trim();
         const sectionGrade = addSectionForm.grade.trim();
-        console.log(sectionGrade)
+        // console.log(sectionGrade)
 
         if (!sectionName || !sectionGrade) {
             return;
@@ -101,10 +101,8 @@ function Students() {
 
         axios.post(`/api/add_section`, payload)
         .then((res) => {
-            console.log(res)
             const status = res.data.status
             const createdSectionId = String(res.data.sectionId || "").trim();
-            console.log(status)
             if (!status || !createdSectionId) {
                 alert("Something went wrong. Try again later!")
                 return
@@ -126,7 +124,7 @@ function Students() {
             }
 
             if (!selectedSection) {
-            setSelectedSection(newSection.name);
+            setSelectedSection(newSection.id);
             setFormData((prev) => ({
                 ...prev,
                 section: newSection.name
@@ -150,9 +148,8 @@ function Students() {
 
     // Section management handlers
     const handleSectionCardClick = (section) => {
-        console.log(section)
         setActiveSection(section);
-        setSelectedSection(section.name);
+        setSelectedSection(section.id);
         setFormData(prev => ({
         ...prev,
         section: section.name,
@@ -193,6 +190,24 @@ function Students() {
         return;
         }
 
+        const normalizedName = trimmedName.toLowerCase();
+        const normalizedGrade = trimmedGrade.toLowerCase();
+        const hasDuplicateSection = sections.some((section) => {
+            if (section.id === editingSection.id) {
+                return false;
+            }
+
+            return (
+                String(section.name ?? "").trim().toLowerCase() === normalizedName &&
+                String(section.grade ?? "").trim().toLowerCase() === normalizedGrade
+            );
+        });
+
+        if (hasDuplicateSection) {
+            alert(`A section ${trimmedName} for ${trimmedGrade} already exists.`);
+            return;
+        }
+
         const currentName = editingSection.name?.trim() || "";
         const currentGrade = editingSection.grade?.trim() || "";
         const hasChanges =
@@ -214,8 +229,6 @@ function Students() {
         newSectionName: trimmedName,
         newGradeLevel: trimmedGrade,
         };
-
-        console.log(payload)
 
         setIsSavingSection(true);
         axios.post("/api/update_section", payload)
@@ -244,8 +257,8 @@ function Students() {
             });
             }
 
-            if (selectedSection === editingSection.name) {
-            setSelectedSection(trimmedName);
+            if (selectedSection === editingSection.id) {
+            setSelectedSection(editingSection.id);
             setFormData((prev) => ({
                 ...prev,
                 section: trimmedName
@@ -351,9 +364,10 @@ function Students() {
             setActiveSection(nextSections[0] || null);
             }
 
-            if (selectedSection === editingSection.name) {
+            if (selectedSection === editingSection.id) {
             const fallbackSectionName = nextSections[0]?.name || "";
-            setSelectedSection(fallbackSectionName);
+            const fallbackSectionId = nextSections[0]?.id || "";
+            setSelectedSection(fallbackSectionId);
             setFormData((prev) => ({
                 ...prev,
                 section: fallbackSectionName
@@ -407,7 +421,7 @@ function Students() {
         sex: "",
         age: "",
         grade: "",
-        section: selectedSection,
+        section: "",
         height: "",
         weight: "",
     });
@@ -673,7 +687,7 @@ function Students() {
         })
         .then((response) => {
             const data = response.data;
-            console.log(data)
+            // console.log(data)
             if (!data?.status) {
                 setSections([]);
                 setActiveSection(null);
@@ -698,11 +712,12 @@ function Students() {
 
             setSections(fetchedSections);
             const initialSection = fetchedSections[0] || null;
+            const initialSectionId = initialSection?.id || "";
             const initialSectionName = initialSection?.name || "";
             const initialSectionGrade = initialSection?.grade || "";
 
             setActiveSection(initialSection);
-            setSelectedSection(initialSectionName);
+            setSelectedSection(initialSectionId);
             setFormData((prev) => ({
                 ...prev,
                 section: initialSectionName,
@@ -726,7 +741,7 @@ function Students() {
         })
         .then((response) => {
             const data = response.data;
-            console.log(data)
+            // console.log(data)
             
             if (!data?.status) {
                 setStudents([]);
@@ -738,12 +753,12 @@ function Students() {
                 : Array.isArray(data.result)
                     ? data.result
                     : [];
-            console.log(rawStudents)
+            // console.log(rawStudents)
             setRawStudents(rawStudents)
             const normalizedStudents = Array.isArray(rawStudents)
                 ? rawStudents.map(normalizeStudent)
                 : [];
-            console.log(normalizedStudents)
+            // console.log(normalizedStudents)
             setStudents(normalizedStudents);
         })
         .catch((error) => {
@@ -1106,7 +1121,7 @@ function Students() {
         const activeSectionId = measurementActiveSectionId;
         const activeSection = measurementSection;
         
-        console.log(activeSection?.name)
+        // console.log(activeSection?.name)
         const confirmSaveMeasurements = window.confirm(
             `Save ${activeSection?.name} new measurement? This cannot be undone.`
         );
@@ -1135,7 +1150,7 @@ function Students() {
             }),
         };
 
-        console.log("Measurement save payload:", payload);
+        // console.log("Measurement save payload:", payload);
 
         setIsSavingMeasurements(true);
         axios
@@ -1166,10 +1181,6 @@ function Students() {
             return "Participated";
         case "absent":
             return "Absent";
-        case "did-not-eat":
-            return "Did Not Eat";
-        case "excused":
-            return "Excused";
         default:
             return status;
         }
@@ -1536,6 +1547,86 @@ function Students() {
         };
     }, [selectedStudentTimeline]);
 
+    const selectedStudentAttentionNotes = useMemo(() => {
+        const notes = [];
+        const currentBmi = bmiTrendSummary.currentBmi;
+        const previousBmi = bmiTrendSummary.previousBmi;
+        const currentStatus = bmiTrendSummary.currentStatus;
+        const previousStatus = bmiTrendSummary.previousStatus;
+        const currentStatusLabel = currentStatus ? getBMIStatusLabel(currentStatus).toLowerCase() : "";
+        const previousStatusLabel = previousStatus ? getBMIStatusLabel(previousStatus).toLowerCase() : "";
+
+        if (currentBmi == null) {
+            notes.push("BMI note: no measurement history is available yet, so the student's weight trend still needs a baseline.");
+        } else if (previousBmi == null || !previousStatus) {
+            notes.push(
+                `BMI note: the latest reading is ${currentBmi.toFixed(1)}, which places the student in the ${currentStatusLabel} range. Another measurement will help confirm whether the student is moving toward or away from the healthy range.`
+            );
+        } else if (currentStatus === "normal" && previousStatus !== "normal") {
+            notes.push(
+                `BMI note: the student has moved from ${previousStatusLabel} back into the normal range, with the latest BMI recorded at ${currentBmi.toFixed(1)}. Keep tracking the next measurements to make sure the recovery holds.`
+            );
+        } else if (currentStatus !== "normal" && previousStatus === "normal") {
+            notes.push(
+                `BMI note: the latest BMI of ${currentBmi.toFixed(1)} shows a shift from normal to ${currentStatusLabel}. This student may need closer follow-up on nutrition and the next scheduled measurement.`
+            );
+        } else if (bmiTrendSummary.trend.tone === "positive") {
+            notes.push(
+                `BMI note: compared with the previous BMI of ${previousBmi.toFixed(1)}, the latest reading of ${currentBmi.toFixed(1)} is moving in a better direction while the student remains in the ${currentStatusLabel} range.`
+            );
+        } else if (bmiTrendSummary.trend.tone === "danger") {
+            notes.push(
+                `BMI note: compared with the previous BMI of ${previousBmi.toFixed(1)}, the latest reading of ${currentBmi.toFixed(1)} suggests movement farther from the healthy range while the student remains ${currentStatusLabel}.`
+            );
+        } else if (bmiTrendSummary.trend.tone === "warning") {
+            notes.push(
+                `BMI note: the student is still classified as normal, but the latest BMI of ${currentBmi.toFixed(1)} is getting close to the lower boundary. Continued observation is recommended.`
+            );
+        } else {
+            notes.push(
+                `BMI note: the student is currently ${currentStatusLabel} with a BMI of ${currentBmi.toFixed(1)}, and the change from the previous reading of ${previousBmi.toFixed(1)} is minimal.`
+            );
+        }
+
+        if (isSelectedStudentAttendanceLoading) {
+            notes.push("Attendance note: feeding participation records are still loading.");
+            return notes;
+        }
+
+        const totalSessions = selectedStudentParticipationRows.length;
+        const absenceCount = selectedStudentParticipationRows.filter((record) => record.status === "absent").length;
+        const participatedCount = totalSessions - absenceCount;
+
+        if (totalSessions === 0) {
+            notes.push("Attendance note: no feeding participation records have been logged for this student yet.");
+            return notes;
+        }
+
+        const participationRate = Math.round((participatedCount / totalSessions) * 100);
+        const absenceLabel = absenceCount === 1 ? "absence" : "absences";
+        const sessionLabel = totalSessions === 1 ? "session" : "sessions";
+
+        if (absenceCount === 0) {
+            notes.push(
+                `Attendance note: the student joined all ${totalSessions} recorded feeding ${sessionLabel}, giving a ${participationRate}% participation rate.`
+            );
+        } else if (participationRate >= 85) {
+            notes.push(
+                `Attendance note: participation remains consistent at ${participationRate}% across ${totalSessions} feeding ${sessionLabel}, with ${absenceCount} ${absenceLabel} recorded so far.`
+            );
+        } else if (participationRate >= 60) {
+            notes.push(
+                `Attendance note: the student has a ${participationRate}% participation rate across ${totalSessions} feeding ${sessionLabel}, with ${absenceCount} ${absenceLabel}. Extra follow-up may help improve consistency.`
+            );
+        } else {
+            notes.push(
+                `Attendance note: the student has joined ${participatedCount} of ${totalSessions} feeding ${sessionLabel}, for a ${participationRate}% participation rate, while ${absenceCount} ${absenceLabel} have been recorded.`
+            );
+        }
+
+        return notes;
+    }, [bmiTrendSummary, isSelectedStudentAttendanceLoading, selectedStudentParticipationRows]);
+
     const renderTrendIcon = (icon) => {
         if (icon === "arrowUp") {
             return (
@@ -1589,6 +1680,7 @@ function Students() {
     // Form validation
     const validateForm = () => {
         const errors = {};
+        const isEditingStudent = Boolean(editingStudentMeta);
         
         if (!formData.firstName.trim()) {
         errors.firstName = "First name is required";
@@ -1602,16 +1694,16 @@ function Students() {
         if (!formData.age || parseInt(formData.age) < 1) {
         errors.age = "Valid age is required";
         }
-        if (!formData.grade.trim()) {
+        if (!isEditingStudent && !formData.grade.trim()) {
         errors.grade = "Grade level is required";
         }
-        if (!formData.section.trim()) {
+        if (!isEditingStudent && !formData.section.trim()) {
         errors.section = "Section is required";
         }
-        if (!formData.height || parseInt(formData.height) < 1) {
+        if (!isEditingStudent && (!formData.height || parseInt(formData.height) < 1)) {
         errors.height = "Valid height is required";
         }
-        if (!formData.weight || parseInt(formData.weight) < 1) {
+        if (!isEditingStudent && (!formData.weight || parseInt(formData.weight) < 1)) {
         errors.weight = "Valid weight is required";
         }
         
@@ -1709,7 +1801,7 @@ function Students() {
         userId: user.id
         };
         
-        console.log(payload)
+        // console.log(payload)
         axios.post(`/api/add_students`, payload)
             .then((response) => {
             if (!response.data?.status) {
@@ -1766,16 +1858,6 @@ function Students() {
         setFormErrors({});
     };
 
-    // Update form section when selected section changes
-    const handleSectionChange = (e) => {
-        const newSection = e.target.value;
-        setSelectedSection(newSection);
-        setFormData(prev => ({
-        ...prev,
-        section: newSection
-        }));
-    };
-
     const handleEditStudentClick = (studentId, userId) => {
         const student = students.find((item) => item.id === studentId);
         if (!student) {
@@ -1805,7 +1887,7 @@ function Students() {
             studentId,
             userId,
         };
-        console.log("Edit student payload:", payload);
+        // console.log("Edit student payload:", payload);
     };
 
     const handleUpdateStudent = (e) => {
@@ -1816,6 +1898,10 @@ function Students() {
         }
 
         if (!editingStudentMeta) {
+            return;
+        }
+
+        if (!validateForm()) {
             return;
         }
 
@@ -1857,7 +1943,7 @@ function Students() {
                 )
             );
 
-            console.log("Update student payload:", payload);
+            // console.log("Update student payload:", payload);
             setToastMessage("Student details updated successfully!");
             setShowToast(true);
             setTimeout(() => setShowToast(false), 3000);
@@ -1885,7 +1971,7 @@ function Students() {
         }
 
         if (Object.prototype.hasOwnProperty.call(studentAttendanceCache, studentId)) {
-            console.log("Student attendance (cached):", studentAttendanceCache[studentId]);
+            // console.log("Student attendance (cached):", studentAttendanceCache[studentId]);
             return;
         }
 
@@ -1919,7 +2005,7 @@ function Students() {
                     ...prev,
                     [studentId]: attendance,
                 }));
-                console.log("Student attendance (fetched):", attendance);
+                // console.log("Student attendance (fetched):", attendance);
             })
             .catch((error) => {
                 console.error("Fetching student attendance error:", error);
@@ -1961,7 +2047,7 @@ function Students() {
             studentId: selectedStudent.id
         };
 
-        console.log(payload)
+        // console.log(payload)
         axios.delete("/api/delete_student", { data: payload })
         .then((response) => {
             const data = response.data;
@@ -2029,7 +2115,7 @@ function Students() {
             myLink = "404"
         }
 
-        console.log(myLink)
+        // console.log(myLink)
 
         navigate(`/${myLink}`)
     }
@@ -2895,7 +2981,6 @@ function Students() {
                 className="students-modal-overlay"
                 onClick={() => setSelectedStudent(null)}
                 >
-                    {console.log(selectedStudent)}
                 <div
                     className="students-modal"
                     onClick={(e) => e.stopPropagation()}
@@ -3145,9 +3230,9 @@ function Students() {
                             <span>Attention Items</span>
                         </div>
                         <ul className="students-notes-list">
-                            <li>BMI improving steadily - continue monitoring</li>
-                            <li>Good feeding participation rate (95%)</li>
-                            <li>Parent consultation scheduled for next week</li>
+                            {selectedStudentAttentionNotes.map((note, index) => (
+                                <li key={`attention-note-${index}`}>{note}</li>
+                            ))}
                         </ul>
                         </div>
                     </div>

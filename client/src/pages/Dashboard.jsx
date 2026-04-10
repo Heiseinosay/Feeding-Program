@@ -1,5 +1,5 @@
 // PACKAGES
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from "react-router";
 import axios from 'axios';
 import {
@@ -25,9 +25,341 @@ import Loading from '../components/Loading';
 
 // Images
 import Logo from '../images/logo.png'
-import { apiFetch, initAuth, logout } from "../api";
+import { initAuth, logout } from "../api";
+
+const formatNutriBotIntentLabel = (intent) => {
+    const labelMap = {
+        list_at_risk_students: "List at-risk students",
+        count_at_risk_students: "Count at-risk students",
+        list_students_by_bmi_category: "List students by BMI category",
+        list_at_risk_recently_absent_students: "List at-risk students absent from the latest feeding session",
+        find_student: "Find a student",
+        summarise_section_nutrition_status: "Summarize section nutrition status",
+        get_student_bmi_history: "Get student BMI history",
+        get_student_latest_bmi: "Get student latest BMI",
+        list_students_missing_recent_measurement: "List students missing recent measurement",
+    };
+
+    return labelMap[intent] || String(intent || "")
+        .split("_")
+        .filter(Boolean)
+        .map((word) => (word.toLowerCase() === "bmi" ? "BMI" : `${word[0]?.toUpperCase() || ""}${word.slice(1)}`))
+        .join(" ");
+};
+
+const formatNutriBotDate = (value) => {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return value || "-";
+    }
+
+    return parsed.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+    });
+};
+
+const formatOrdinalLabel = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number <= 0) {
+        return `${value}`;
+    }
+
+    const mod100 = number % 100;
+    if (mod100 >= 11 && mod100 <= 13) {
+        return `${number}th`;
+    }
+
+    const mod10 = number % 10;
+    if (mod10 === 1) {
+        return `${number}st`;
+    }
+    if (mod10 === 2) {
+        return `${number}nd`;
+    }
+    if (mod10 === 3) {
+        return `${number}rd`;
+    }
+    return `${number}th`;
+};
+
+const NutriBotChat = React.memo(function NutriBotChat({
+    isChatOpen,
+    isChatExpanded,
+    chatMessages,
+    onOpen,
+    onClose,
+    onToggleExpanded,
+    onExpandChat,
+    onSendMessage,
+}) {
+    const [chatDraft, setChatDraft] = useState("");
+    const [expandedTableMessageId, setExpandedTableMessageId] = useState(null);
+    const chatHistoryRef = useRef(null);
+
+    const handleExpandTable = (messageId) => {
+        onExpandChat();
+        setExpandedTableMessageId(messageId);
+    };
+
+    const handleSend = () => {
+        const trimmedMessage = String(chatDraft || "").trim();
+        if (!trimmedMessage) {
+            return;
+        }
+
+        onSendMessage(trimmedMessage);
+        setChatDraft("");
+        window.requestAnimationFrame(() => {
+            const historyElement = chatHistoryRef.current;
+            if (!historyElement) {
+                return;
+            }
+            historyElement.scrollTop = historyElement.scrollHeight;
+        });
+    };
+
+    const handleNutriBotKeyDown = (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            handleSend();
+        }
+    };
+
+    return (
+        <div className={`dashboard-chat-shell ${isChatOpen ? "is-open" : ""} ${isChatExpanded ? "is-expanded" : ""}`}>
+            <button
+                type="button"
+                className={`dashboard-chat-launcher ${isChatOpen ? "is-hidden" : ""}`}
+                onClick={onOpen}
+                aria-label="Open NutriBot"
+            >
+                <span className="dashboard-chat-launcher-glow"></span>
+                <span className="dashboard-chat-launcher-icon">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={1.8}
+                            d="M8 10h8M8 14h5m7-2c0 4.418-3.582 8-8 8a8.84 8.84 0 01-4.083-.98L4 20l1.145-3.054A7.965 7.965 0 014 12c0-4.418 3.582-8 8-8s8 3.582 8 8z"
+                        />
+                    </svg>
+                </span>
+                <span className="dashboard-chat-launcher-text">
+                    <strong>NutriBot</strong>
+                    <small>Ask about nutrition data</small>
+                </span>
+            </button>
+
+            <section
+                className={`dashboard-chat-panel ${isChatOpen ? "is-open" : ""} ${isChatExpanded ? "is-expanded" : ""}`}
+                aria-hidden={!isChatOpen}
+            >
+                <div className="dashboard-chat-header">
+                    <div className="dashboard-chat-brand">
+                        <div className="dashboard-chat-avatar">N</div>
+                        <div>
+                            <h3>NutriBot</h3>
+                            <p>Nutrition assistant preview</p>
+                        </div>
+                    </div>
+
+                    <div className="dashboard-chat-controls">
+                        <button
+                            type="button"
+                            className="dashboard-chat-control"
+                            onClick={onToggleExpanded}
+                            aria-label={isChatExpanded ? "Exit full size chat" : "Open full size chat"}
+                            title={isChatExpanded ? "Exit full size chat" : "Open full size chat"}
+                        >
+                            {isChatExpanded ? (
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 15H5v4m0-4l5 5M15 9h4V5m0 4l-5-5" />
+                                </svg>
+                            ) : (
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 3h6v6m0-6l-7 7M9 21H3v-6m0 6l7-7" />
+                                </svg>
+                            )}
+                        </button>
+                        <button
+                            type="button"
+                            className="dashboard-chat-control"
+                            onClick={onClose}
+                            aria-label="Minimize NutriBot"
+                            title="Minimize"
+                        >
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6 12h12" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div ref={chatHistoryRef} className="dashboard-chat-history">
+                    <div className="dashboard-chat-day-label">Today</div>
+                    {chatMessages.map((message) => (
+                        <div
+                            key={message.id}
+                            className={`dashboard-chat-message ${message.role === "user" ? "is-user" : "is-bot"}`}
+                        >
+                            <div className="dashboard-chat-bubble">
+                                {message.contentType === "capabilities" ? (
+                                    <>
+                                        <p>{message.text}</p>
+                                        <ul>
+                                            {(message.capabilities || []).map((capability, index) => (
+                                                <li key={`${capability.intent || "capability"}_${index}`}>
+                                                    <strong>{formatNutriBotIntentLabel(capability.intent)}:</strong>{" "}
+                                                    {Array.isArray(capability.sample_questions)
+                                                        ? capability.sample_questions.join("; ")
+                                                        : ""}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </>
+                                ) : message.contentType === "table" ? (
+                                    <>
+                                        <p>{message.text}</p>
+                                        <div className="dashboard-chat-table-actions">
+                                            <button
+                                                type="button"
+                                                className="dashboard-chat-table-toggle"
+                                                onClick={() => handleExpandTable(message.id)}
+                                            >
+                                                Expand table
+                                            </button>
+                                        </div>
+                                        <div className="dashboard-chat-table-wrap">
+                                            <table className="dashboard-chat-table">
+                                                <thead>
+                                                    <tr>
+                                                        {(message.columns || []).map((column) => (
+                                                            <th key={column}>{column}</th>
+                                                        ))}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {(message.rows || []).map((row, rowIndex) => (
+                                                        <tr key={`${message.id}_row_${rowIndex}`}>
+                                                            {row.map((cell, cellIndex) => (
+                                                                <td key={`${message.id}_cell_${rowIndex}_${cellIndex}`}>{cell}</td>
+                                                            ))}
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </>
+                                ) : message.contentType === "typing" ? (
+                                    <div className="dashboard-chat-typing" aria-label="NutriBot is typing">
+                                        <span className="dashboard-chat-typing-dot"></span>
+                                        <span className="dashboard-chat-typing-dot"></span>
+                                        <span className="dashboard-chat-typing-dot"></span>
+                                    </div>
+                                ) : (
+                                    <p>{message.text}</p>
+                                )}
+                                {message.contentType !== "typing" && <span>{message.timestamp}</span>}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                {expandedTableMessageId && (() => {
+                    const expandedMessage = chatMessages.find((message) => message.id === expandedTableMessageId);
+                    if (!expandedMessage || expandedMessage.contentType !== "table") {
+                        return null;
+                    }
+
+                    return (
+                        <div className="dashboard-chat-table-modal" role="dialog" aria-modal="true" aria-label="Expanded NutriBot table">
+                            <div className="dashboard-chat-table-modal-card">
+                                <div className="dashboard-chat-table-modal-header">
+                                    <div>
+                                        <h4>NutriBot Table View</h4>
+                                        <p>{expandedMessage.text}</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="dashboard-chat-table-modal-close"
+                                        onClick={() => setExpandedTableMessageId(null)}
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                                <div className="dashboard-chat-table-modal-wrap">
+                                    <table className="dashboard-chat-table">
+                                        <thead>
+                                            <tr>
+                                                {(expandedMessage.columns || []).map((column) => (
+                                                    <th key={`expanded_${column}`}>{column}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {(expandedMessage.rows || []).map((row, rowIndex) => (
+                                                <tr key={`${expandedMessage.id}_expanded_row_${rowIndex}`}>
+                                                    {row.map((cell, cellIndex) => (
+                                                        <td key={`${expandedMessage.id}_expanded_cell_${rowIndex}_${cellIndex}`}>{cell}</td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })()}
+
+                <div className="dashboard-chat-composer">
+                    <div className="dashboard-chat-composer-top">
+                        <span>Message NutriBot</span>
+                        <span>{chatDraft.length}/500</span>
+                    </div>
+                    <textarea
+                        className="dashboard-chat-textarea"
+                        placeholder="Ask about feeding sessions, BMI trends, or at-risk students..."
+                        value={chatDraft}
+                        onChange={(event) => setChatDraft(event.target.value.slice(0, 500))}
+                        onKeyDown={handleNutriBotKeyDown}
+                        rows={isChatExpanded ? 4 : 3}
+                    />
+                    <div className="dashboard-chat-composer-actions">
+                        <button
+                            type="button"
+                            className="dashboard-chat-secondary"
+                            onClick={() => setChatDraft("")}
+                        >
+                            Clear
+                        </button>
+                        <button
+                            type="button"
+                            className="dashboard-chat-send"
+                            onClick={handleSend}
+                            disabled={!chatDraft.trim()}
+                        >
+                            Send
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+    );
+});
 
 function Dashboard() {
+    const initialChatMessages = [
+        {
+            id: "nutribot_welcome",
+            role: "bot",
+            text: "Hi, I'm NutriBot. I can help explain BMI trends, feeding session summaries, and student nutrition questions.",
+            timestamp: "Just now",
+        },
+    ];
+
     const navigate = useNavigate()
     const [user, setUser] = useState(null);
     const [checkingAuth, setCheckingAuth] = useState(true);
@@ -42,8 +374,13 @@ function Dashboard() {
         description: "No upcoming feeding program",
     });
     const [totalCompletedSessions, setTotalCompletedSessions] = useState(0);
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [isChatExpanded, setIsChatExpanded] = useState(false);
+    const [chatMessages, setChatMessages] = useState(initialChatMessages);
 
-    // ** FETCH USER
+    // * FETCH USER
+    // * FOR TESTING ONLY
+    /*
     const handleMe = () => {
         apiFetch({ method: "get", url: "/me" })
             .then(response => {
@@ -54,7 +391,7 @@ function Dashboard() {
             }).catch(err => {
                 console.log(err)
             })
-    }
+    } */
 
     // *CHECK IF THERE IS A USER LOGGED
     useEffect(() => {
@@ -98,7 +435,7 @@ function Dashboard() {
 
                 const students = Array.isArray(data.students) ? data.students : [];
                 setStudents(students)
-                console.log("Dashboard students:", students);
+                // console.log("Dashboard students:", students);
             })
             .catch((error) => {
                 console.error("Dashboard get_all_students error:", error);
@@ -145,7 +482,7 @@ function Dashboard() {
             }));
 
             setSections(fetchedSections);
-            console.log("Sections: ", fetchedSections)
+            // console.log("Sections: ", fetchedSections)
         })
         .catch((error) => {
             console.error("Fetching sections error:", error);
@@ -170,7 +507,7 @@ function Dashboard() {
                 }
                 const summaryRows = Array.isArray(data.Summary) ? data.Summary : [];
                 setStatusSummaryRows(summaryRows);
-                console.log("Dashboard status summary:", summaryRows);
+                // console.log("Dashboard status summary:", summaryRows);
             })
             .catch((error) => {
                 console.error("Dashboard get_all_status_count error:", error);
@@ -198,7 +535,7 @@ function Dashboard() {
 
                 const summaryRows = Array.isArray(data.Summary) ? data.Summary : [];
                 setBmiTrendRows(summaryRows);
-                console.log("Dashboard BMI trend:", summaryRows);
+                // console.log("Dashboard BMI trend:", summaryRows);
             })
             .catch((error) => {
                 console.error("Dashboard get_bmi_trend error:", error);
@@ -650,6 +987,7 @@ function Dashboard() {
         navigate("/");
     };
 
+    // Quick Actions
     const handleQuickAddFeedingSession = () => {
         navigate("/FeedingProgram", {
             state: { openCreateSession: true },
@@ -661,24 +999,446 @@ function Dashboard() {
             state: { openMeasurementModal: true },
         });
     };
+    
+    // *Nutribot Chat
+    const openNutriBot = () => {
+        setIsChatOpen(true);
+    };
 
-    // *Note: Teacher initials
-    const getFirstLetters = (str) => {
-        const words = str.split(' ');
+    const closeNutriBot = () => {
+        setIsChatExpanded(false);
+        setIsChatOpen(false);
+    };
 
-        const firstLetters = words.map(word => {
-            if (word.length > 0) {
-            return word[0]; // Get the first character
-            }
-            return '';
-        });
-        return firstLetters.join(''); 
-    }
+    const toggleNutriBotExpanded = () => {
+        if (!isChatOpen) {
+            setIsChatOpen(true);
+        }
+        setIsChatExpanded((prev) => !prev);
+    };
 
-    //* QUICK ACTIONS
-    // const handleViewStudents = () => {
+    const expandNutriBot = () => {
+        if (!isChatOpen) {
+            setIsChatOpen(true);
+        }
+        setIsChatExpanded(true);
+    };
 
-    // }
+    const sendNutriBotMessage = (messageText) => {
+        const trimmedMessage = String(messageText || "").trim();
+        if (!trimmedMessage) {
+            return;
+        }
+
+        const requestStartedAt = Date.now();
+        const typingMessageId = `bot_typing_${requestStartedAt}`;
+
+        const userMessage = {
+            id: `user_${requestStartedAt}`,
+            role: "user",
+            text: trimmedMessage,
+            timestamp: "Now",
+        };
+
+        const typingMessage = {
+            id: typingMessageId,
+            role: "bot",
+            contentType: "typing",
+        };
+
+        const replaceTypingMessage = (nextMessage) => {
+            const elapsedTime = Date.now() - requestStartedAt;
+            const remainingDelay = Math.max(0, 1000 - elapsedTime);
+
+            window.setTimeout(() => {
+                setChatMessages((prev) => prev.map((message) => (
+                    message.id === typingMessageId ? nextMessage : message
+                )));
+            }, remainingDelay);
+        };
+
+        setChatMessages((prev) => [...prev, userMessage, typingMessage]);
+        setIsChatOpen(true);
+
+        axios
+            .get("/api/nutribot_send", {
+                params: {
+                    message: trimmedMessage,
+                    teacherId: user?.id,
+                },
+            })
+            .then((response) => {
+                // console.log("NutriBot send response:", response.data);
+                const res = response.data ?? {};
+
+                if (res.status === false || res?.res?.status === false) {
+                    const fallbackReply = {
+                        id: typingMessageId,
+                        role: "bot",
+                        text: res.message || "Sorry, I did not understand that request. Try asking in a different way or type 'What can you do?'",
+                        timestamp: "Now",
+                    };
+
+                    replaceTypingMessage(fallbackReply);
+                    return;
+                }
+
+                if (res.intent === "show_nutribot_capabilities") {
+                    const capabilityReply = {
+                        id: typingMessageId,
+                        role: "bot",
+                        contentType: "capabilities",
+                        text: "Here are the kinds of nutrition questions I can help with. You can try any of these sample prompts:",
+                        capabilities: Array.isArray(res.message) ? res.message : [],
+                        timestamp: "Now",
+                    };
+
+                    replaceTypingMessage(capabilityReply);
+                    return;
+                }
+
+                if (res.intent === "list_at_risk_students") {
+                    const summaryRows = Array.isArray(res?.res?.Summary) ? res.res.Summary : [];
+                    const tableReply = {
+                        id: typingMessageId,
+                        role: "bot",
+                        contentType: "table",
+                        text: `Here ${summaryRows.length === 1 ? "is the at-risk student" : "are the at-risk students"} I found${summaryRows.length ? ` (${summaryRows.length} total)` : ""}.`,
+                        columns: [
+                            "Student ID",
+                            "Full Name",
+                            "Sex",
+                            "Grade Level",
+                            "Section",
+                            "BMI Status",
+                            "Measurement Date",
+                        ],
+                        rows: summaryRows.map((row) => ([
+                            row?.[0] ?? "-",
+                            row?.[1] ?? "-",
+                            row?.[2] ?? "-",
+                            row?.[3] ?? "-",
+                            row?.[4] ?? "-",
+                            row?.[5] ?? "-",
+                            formatNutriBotDate(row?.[6]),
+                        ])),
+                        timestamp: "Now",
+                    };
+
+                    replaceTypingMessage(tableReply);
+                    return;
+                }
+
+                if (res.intent === "list_students_by_bmi_category") {
+                    const summaryRows = Array.isArray(res?.res?.Summary) ? res.res.Summary : [];
+                    const bmiCategory = String(summaryRows?.[0]?.[5] ?? "selected BMI category")
+                        .replace(/^./, (letter) => letter.toUpperCase());
+
+                    const tableReply = {
+                        id: typingMessageId,
+                        role: "bot",
+                        contentType: "table",
+                        text: `Here ${summaryRows.length === 1 ? "is the student" : "are the students"} I found for the ${bmiCategory} BMI category${summaryRows.length ? ` (${summaryRows.length} total)` : ""}.`,
+                        columns: [
+                            "Student ID",
+                            "Full Name",
+                            "Sex",
+                            "Grade Level",
+                            "Section",
+                            "BMI Status",
+                            "Measurement Date",
+                        ],
+                        rows: summaryRows.map((row) => ([
+                            row?.[0] ?? "-",
+                            row?.[1] ?? "-",
+                            row?.[2] ?? "-",
+                            row?.[3] ?? "-",
+                            row?.[4] ?? "-",
+                            row?.[5] ?? "-",
+                            formatNutriBotDate(row?.[6]),
+                        ])),
+                        timestamp: "Now",
+                    };
+
+                    replaceTypingMessage(tableReply);
+                    return;
+                }
+
+                if (res.intent === "list_at_risk_recently_absent_students") {
+                    const summaryRows = Array.isArray(res?.res?.Summary) ? res.res.Summary : [];
+                    const tableReply = {
+                        id: typingMessageId,
+                        role: "bot",
+                        contentType: "table",
+                        text: `Here ${summaryRows.length === 1 ? "is the at-risk student" : "are the at-risk students"} I found who were absent in the latest feeding session${summaryRows.length ? ` (${summaryRows.length} total)` : ""}.`,
+                        columns: [
+                            "Student ID",
+                            "Full Name",
+                            "Sex",
+                            "Grade Level",
+                            "Section",
+                            "BMI Status",
+                            "Latest Session ID",
+                            "Remarks",
+                        ],
+                        rows: summaryRows.map((row) => ([
+                            row?.[0] ?? "-",
+                            row?.[1] ?? "-",
+                            row?.[2] ?? "-",
+                            row?.[3] ?? "-",
+                            row?.[4] ?? "-",
+                            row?.[5] ?? "-",
+                            row?.[6] ?? "-",
+                            row?.[7] || "-",
+                        ])),
+                        timestamp: "Now",
+                    };
+
+                    replaceTypingMessage(tableReply);
+                    return;
+                }
+
+                if (res.intent === "find_student") {
+                    const summaryRows = Array.isArray(res?.res?.Summary) ? res.res.Summary : [];
+                    const tableReply = {
+                        id: typingMessageId,
+                        role: "bot",
+                        contentType: "table",
+                        text: `Here ${summaryRows.length === 1 ? "is the student" : "are the students"} I found for your search${summaryRows.length ? ` (${summaryRows.length} match${summaryRows.length === 1 ? "" : "es"})` : ""}.`,
+                        columns: [
+                            "Student ID",
+                            "Full Name",
+                            "Sex",
+                            "Age",
+                            "Grade Level",
+                            "Section",
+                            "School",
+                        ],
+                        rows: summaryRows.map((row) => ([
+                            row?.[0] ?? "-",
+                            row?.[1] ?? "-",
+                            row?.[2] ?? "-",
+                            row?.[3] ?? "-",
+                            row?.[4] ?? "-",
+                            row?.[5] ?? "-",
+                            row?.[6] ?? "-",
+                        ])),
+                        timestamp: "Now",
+                    };
+
+                    replaceTypingMessage(tableReply);
+                    return;
+                }
+
+                if (res.intent === "summarise_section_nutrition_status") {
+                    const summaryRow = Array.isArray(res?.res?.Summary) ? res.res.Summary[0] : null;
+                    const sectionName = summaryRow?.[0] ?? "This section";
+                    const totalStudents = Number(summaryRow?.[1] ?? 0);
+                    const underweightCount = Number(summaryRow?.[2] ?? 0);
+                    const normalCount = Number(summaryRow?.[3] ?? 0);
+                    const overweightCount = Number(summaryRow?.[4] ?? 0);
+
+                    const summaryReply = {
+                        id: typingMessageId,
+                        role: "bot",
+                        text: `${sectionName} has ${totalStudents} ${totalStudents === 1 ? "student" : "students"} in total. ${underweightCount} ${underweightCount === 1 ? "student is" : "students are"} underweight, ${normalCount} ${normalCount === 1 ? "student is" : "students are"} normal, and ${overweightCount} ${overweightCount === 1 ? "student is" : "students are"} overweight.`,
+                        timestamp: "Now",
+                    };
+
+                    replaceTypingMessage(summaryReply);
+                    return;
+                }
+
+                if (res.intent === "get_student_latest_bmi") {
+                    const summaryRows = Array.isArray(res?.res?.Summary) ? res.res.Summary : [];
+                    const latestBmiText = summaryRows
+                        .map((row) => {
+                            const fullName = row?.[1] ?? "This student";
+                            const section = row?.[2] ?? "Unknown section";
+                            const bmiValue = row?.[3] ?? "-";
+                            const bmiStatus = row?.[4] ?? "-";
+                            const measurementDate = formatNutriBotDate(row?.[5]);
+
+                            return `${fullName} from ${section} has a latest BMI of ${bmiValue}, classified as ${bmiStatus}, measured on ${measurementDate}.`;
+                        })
+                        .join(" ");
+
+                    const latestBmiReply = {
+                        id: typingMessageId,
+                        role: "bot",
+                        text: latestBmiText || "I could not find a latest BMI record for that student.",
+                        timestamp: "Now",
+                    };
+
+                    replaceTypingMessage(latestBmiReply);
+                    return;
+                }
+
+                if (res.intent === "get_student_bmi_history") {
+                    const summaryRows = Array.isArray(res?.res?.Summary) ? res.res.Summary : [];
+                    const groupedHistory = new Map();
+
+                    summaryRows.forEach((row) => {
+                        const studentId = row?.[0] ?? "-";
+                        const fullName = row?.[1] ?? "-";
+                        const section = row?.[2] ?? "-";
+                        const bmiValue = row?.[3] ?? "-";
+                        const bmiStatus = row?.[4] ?? "-";
+                        const measurementDate = row?.[5] ?? "";
+                        const groupKey = `${studentId}__${fullName}__${section}`;
+
+                        if (!groupedHistory.has(groupKey)) {
+                            groupedHistory.set(groupKey, {
+                                studentId,
+                                fullName,
+                                section,
+                                history: [],
+                            });
+                        }
+
+                        groupedHistory.get(groupKey).history.push({
+                            bmiValue,
+                            bmiStatus,
+                            measurementDate,
+                        });
+                    });
+
+                    const normalizedRows = Array.from(groupedHistory.values()).map((student) => {
+                        const sortedHistory = [...student.history].sort((left, right) => {
+                            const leftTime = Date.parse(left.measurementDate);
+                            const rightTime = Date.parse(right.measurementDate);
+                            const safeLeft = Number.isNaN(leftTime) ? 0 : leftTime;
+                            const safeRight = Number.isNaN(rightTime) ? 0 : rightTime;
+                            return safeLeft - safeRight;
+                        });
+
+                        return {
+                            ...student,
+                            history: sortedHistory,
+                        };
+                    });
+
+                    const maxProgressCount = normalizedRows.reduce(
+                        (maxCount, student) => Math.max(maxCount, student.history.length),
+                        0,
+                    );
+
+                    const progressColumns = Array.from({ length: maxProgressCount }, (_, index) => `${formatOrdinalLabel(index + 1)} Progress`);
+                    const tableReply = {
+                        id: typingMessageId,
+                        role: "bot",
+                        contentType: "table",
+                        text: `Here ${normalizedRows.length === 1 ? "is the student BMI history" : "are the student BMI histories"} I found${normalizedRows.length ? ` (${normalizedRows.length} student${normalizedRows.length === 1 ? "" : "s"})` : ""}.`,
+                        columns: [
+                            "Student ID",
+                            "Full Name",
+                            "Section",
+                            ...progressColumns,
+                        ],
+                        rows: normalizedRows.map((student) => {
+                            const progressCells = Array.from({ length: maxProgressCount }, (_, index) => {
+                                const progress = student.history[index];
+                                if (!progress) {
+                                    return "-";
+                                }
+                                return `${progress.bmiStatus} (${progress.bmiValue})`;
+                            });
+
+                            return [
+                                student.studentId,
+                                student.fullName,
+                                student.section,
+                                ...progressCells,
+                            ];
+                        }),
+                        timestamp: "Now",
+                    };
+
+                    replaceTypingMessage(tableReply);
+                    return;
+                }
+
+                if (res.intent === "list_students_missing_recent_measurement") {
+                    const summaryRows = Array.isArray(res?.res?.Summary) ? res.res.Summary : [];
+                    const tableReply = {
+                        id: typingMessageId,
+                        role: "bot",
+                        contentType: "table",
+                        text: summaryRows.length > 0
+                            ? `Here ${summaryRows.length === 1 ? "is the student" : "are the students"} I found with missing recent measurements (${summaryRows.length} total).`
+                            : "I did not find any students with missing recent measurements.",
+                        columns: [
+                            "Student ID",
+                            "Full Name",
+                            "Sex",
+                            "Grade Level",
+                            "Section",
+                            "Latest BMI",
+                            "Latest Measurement Date",
+                        ],
+                        rows: summaryRows.map((row) => ([
+                            row?.[0] ?? "-",
+                            row?.[1] ?? "-",
+                            row?.[2] ?? "-",
+                            row?.[3] ?? "-",
+                            row?.[4] ?? "-",
+                            row?.[5] ?? "-",
+                            formatNutriBotDate(row?.[6]),
+                        ])),
+                        timestamp: "Now",
+                    };
+
+                    replaceTypingMessage(tableReply);
+                    return;
+                }
+
+                if (res.intent === "count_at_risk_students") {
+                    const summaryRows = Array.isArray(res?.res?.Summary) ? res.res.Summary : [];
+                    const normalizedRows = summaryRows.map((row) => ({
+                        category: String(row?.[0] ?? "").toLowerCase(),
+                        count: Number(row?.[1] ?? 0),
+                    }));
+
+                    const totalCount = normalizedRows.reduce((sum, row) => sum + (Number.isNaN(row.count) ? 0 : row.count), 0);
+                    const categorySummary = normalizedRows
+                        .filter((row) => row.category)
+                        .map((row) => `${row.count} ${row.category}`)
+                        .join(" and ");
+
+                    const countReply = {
+                        id: typingMessageId,
+                        role: "bot",
+                        text: totalCount > 0
+                            ? `I found ${totalCount} at-risk ${totalCount === 1 ? "student" : "students"} in total: ${categorySummary}.`
+                            : "I did not find any at-risk students in the current result.",
+                        timestamp: "Now",
+                    };
+
+                    replaceTypingMessage(countReply);
+                    return;
+                }
+
+                const botReply = {
+                    id: typingMessageId,
+                    role: "bot",
+                    text: "NutriBot request received. The response display is still being connected, but the backend is processing your message.",
+                    timestamp: "Now",
+                };
+
+                replaceTypingMessage(botReply);
+            })
+            .catch((error) => {
+                console.error("NutriBot send error:", error);
+                const errorReply = {
+                    id: typingMessageId,
+                    role: "bot",
+                    text: "NutriBot could not process your request right now. Please try again.",
+                    timestamp: "Now",
+                };
+
+                replaceTypingMessage(errorReply);
+            });
+    };
 
     // *CHECK IF THERE IS A USER LOGGED
     if (checkingAuth || (user?.id && !studentsFetchDone)) {
@@ -711,7 +1471,7 @@ function Dashboard() {
                 </div>
                 </div>
 
-                <nav className="dashboard-nav" onClick={() => linkNavigate(1)}>
+                <nav className="dashboard-nav">
                 <button className="dashboard-nav-item active">
                     <svg
                     fill="none"
@@ -831,7 +1591,7 @@ function Dashboard() {
                     <span>{getCurrentDate()}</span>
                     </div>
                     <div className="dashboard-teacher-info">
-                    <div className="dashboard-teacher-avatar">{getFirstLetters(user.first_name)}</div>
+                    <div className="dashboard-teacher-avatar">{user.first_name.slice(0, 1) + user.last_name.slice(0, 1)}</div>
                     <span className="dashboard-teacher-name">{teacherName}</span>
                     </div>
                 </div>
@@ -994,7 +1754,7 @@ function Dashboard() {
                     <div className="dashboard-chart-card">
                     <div className="dashboard-chart-header">
                         <h3>BMI Distribution Trend</h3>
-                        <p>Weekly progress for {selectedSectionLabel}</p>
+                        <p>Monthly progress for {selectedSectionLabel}</p>
                     </div>
                     {bmiData.length === 0 ? (
                         <div className="dashboard-chart-empty">No chart data yet.</div>
@@ -1224,7 +1984,16 @@ function Dashboard() {
                 </div>
                 </div>
             </main>
-            {/* <button onClick={handleMe}>click me</button> */}
+            <NutriBotChat
+                isChatOpen={isChatOpen}
+                isChatExpanded={isChatExpanded}
+                chatMessages={chatMessages}
+                onOpen={openNutriBot}
+                onClose={closeNutriBot}
+                onToggleExpanded={toggleNutriBotExpanded}
+                onExpandChat={expandNutriBot}
+                onSendMessage={sendNutriBotMessage}
+            />
     </div>
     )
 }

@@ -1,6 +1,93 @@
 from dbutils import connect_to_db
+from datetime import date, datetime, timedelta
 import json
 from mysql.connector import Error
+
+
+def _normalize_section_ids(section_ids):
+    if not isinstance(section_ids, list):
+        return []
+
+    normalized = []
+    seen = set()
+    for section_id in section_ids:
+        value = str(section_id).strip()
+        if not value or value in seen:
+            continue
+        normalized.append(value)
+        seen.add(value)
+    return normalized
+
+
+def _parse_session_date(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _load_session_section_ids(raw_value):
+    if isinstance(raw_value, list):
+        return _normalize_section_ids(raw_value)
+
+    if isinstance(raw_value, str):
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return []
+        return _normalize_section_ids(parsed)
+
+    return []
+
+
+def _find_weekly_section_conflicts(cursor, user_id, session_date, section_ids, exclude_session_id=None):
+    parsed_date = _parse_session_date(session_date)
+    normalized_section_ids = _normalize_section_ids(section_ids)
+
+    if not parsed_date or not normalized_section_ids:
+        return []
+
+    week_start = parsed_date - timedelta(days=parsed_date.weekday())
+    week_end = week_start + timedelta(days=6)
+
+    query = """
+        SELECT session_id, participating_section
+        FROM tblSessions
+        WHERE teacher_id = %s
+          AND session_date BETWEEN %s AND %s
+    """
+    params = [user_id, week_start, week_end]
+
+    if exclude_session_id:
+        query += " AND session_id <> %s"
+        params.append(exclude_session_id)
+
+    cursor.execute(query, tuple(params))
+    rows = cursor.fetchall()
+
+    conflicts = []
+    requested_sections = set(normalized_section_ids)
+    for _, raw_sections in rows:
+        existing_sections = set(_load_session_section_ids(raw_sections))
+        conflicts.extend(sorted(requested_sections.intersection(existing_sections)))
+
+    deduped_conflicts = []
+    seen = set()
+    for section_id in conflicts:
+        if section_id in seen:
+            continue
+        deduped_conflicts.append(section_id)
+        seen.add(section_id)
+    return deduped_conflicts
 
 def f_get_all_session(user_id):
     mysqldb, cursor = connect_to_db()
@@ -43,14 +130,35 @@ def f_add_session(data):
     print("Im in add_session!")
     user_id = data.get("userId")
     date = data.get("date")
-    section_ids = data.get("section_ids")
+    section_ids = _normalize_section_ids(data.get("section_ids"))
     section_ids_json = json.dumps(section_ids)
     sponsors_text = data.get("sponsors_text")
     foods_text = data.get("foods_text")
 
     print(user_id, date, section_ids_json, sponsors_text, foods_text)
 
+    parsed_date = _parse_session_date(date)
+    if not user_id or not parsed_date:
+        mysqldb.close()
+        return { 'status': False, 'message': 'Missing or invalid session date.' }
+
+    if parsed_date.weekday() >= 5:
+        mysqldb.close()
+        return { 'status': False, 'message': 'Only weekdays (Monday to Friday) are allowed.' }
+
+    if not section_ids:
+        mysqldb.close()
+        return { 'status': False, 'message': 'Please select at least one section.' }
+
     try:        
+        conflicting_sections = _find_weekly_section_conflicts(cursor, user_id, parsed_date, section_ids)
+        if conflicting_sections:
+            return {
+                'status': False,
+                'message': 'One or more sections already have a session scheduled in the same week.',
+                'conflicting_sections': conflicting_sections,
+            }
+
         insert_query = """
             INSERT INTO tblSessions (teacher_id, session_date, participating_section, sponsors, foods_serve)
                 VALUES(%s, %s, %s, %s, %s)
@@ -164,7 +272,7 @@ def f_update_session_information(data):
     session_id = data.get('sessionId')
     user_id = data.get('userId')
     session_date = data.get("date")
-    section_ids = data.get("section_ids")
+    section_ids = _normalize_section_ids(data.get("section_ids"))
     section_ids_json = json.dumps(section_ids if isinstance(section_ids, list) else [])
     sponsors_text = data.get("sponsors_text")
     foods_text = data.get("foods_text")
@@ -175,7 +283,28 @@ def f_update_session_information(data):
         mysqldb.close()
         return { 'status': False, 'message': 'Missing userId or sessionId' }
 
+    parsed_date = _parse_session_date(session_date)
+    if not parsed_date:
+        mysqldb.close()
+        return { 'status': False, 'message': 'Missing or invalid session date.' }
+
+    if parsed_date.weekday() >= 5:
+        mysqldb.close()
+        return { 'status': False, 'message': 'Only weekdays (Monday to Friday) are allowed.' }
+
+    if not section_ids:
+        mysqldb.close()
+        return { 'status': False, 'message': 'Please select at least one section.' }
+
     try:
+        conflicting_sections = _find_weekly_section_conflicts(cursor, user_id, parsed_date, section_ids, exclude_session_id=session_id)
+        if conflicting_sections:
+            return {
+                'status': False,
+                'message': 'One or more sections already have a session scheduled in the same week.',
+                'conflicting_sections': conflicting_sections,
+            }
+
         update_query = """
             UPDATE tblSessions
             SET session_date=%s, participating_section=%s, sponsors=%s, foods_serve=%s

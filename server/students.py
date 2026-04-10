@@ -394,6 +394,51 @@ def f_get_student_attendance(student_id):
         mysqldb.close()
 
 
+def f_get_all_student_attendance(user_id):
+    mysqldb, cursor = connect_to_db()
+    print("Im in f_get_all_student_attendance!")
+    print("user_id for attendance: ", user_id)
+
+    if not user_id:
+        mysqldb.close()
+        return {
+            "status": False,
+            "message": "Missing user_id",
+            "sections": [],
+        }
+
+    try:
+        read_query = (
+            """
+                WITH sections AS (
+                    SELECT DISTINCT section_id
+                    FROM tblstudents
+                    WHERE teacher_id = %s
+                )
+
+                SELECT *
+                FROM tblAttendance
+                WHERE section_id IN (
+                        SELECT * FROM sections
+                    )
+            """
+        )
+        cursor.execute(read_query, (user_id,))
+        result = cursor.fetchall()
+
+        print(result)
+
+        return { 
+                'status': True,
+                'studentsAttendance': result 
+            }
+    except Error as e:
+        print(f"f_get_all_student_attendance! Error in inserting student: {e}")
+        return { 'status': False }
+    finally:
+        mysqldb.close()
+
+
 def f_update_student_measurement_targeted(data):
     mysqldb, cursor = connect_to_db()
     print("Im on f_update_student_measurement_targeted!")
