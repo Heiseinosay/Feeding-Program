@@ -18,7 +18,7 @@ def f_get_all_status_count(user_id):
                     jt.mdate AS measurement_date,
                     DATE_FORMAT(jt.mdate, '%Y-%m-01') AS month_key,
                     JSON_UNQUOTE(JSON_EXTRACT(s.bmi_measurement, CONCAT('$[', jt.rn - 1, ']'))) AS bmi_status
-                FROM tblStudents s
+                FROM tblstudents s
                 JOIN JSON_TABLE(
                     s.measurement_date,
                     '$[*]' COLUMNS (

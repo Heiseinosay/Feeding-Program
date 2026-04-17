@@ -61,7 +61,7 @@ def _find_weekly_section_conflicts(cursor, user_id, session_date, section_ids, e
 
     query = """
         SELECT session_id, participating_section
-        FROM tblSessions
+        FROM tblsessions
         WHERE teacher_id = %s
           AND session_date BETWEEN %s AND %s
     """
@@ -105,8 +105,8 @@ def f_get_all_session(user_id):
     try:
         read_query = (
             "SELECT s.*, "
-            "EXISTS(SELECT 1 FROM tblAttendance a WHERE a.session_id = s.session_id) AS attendance_taken "
-            "FROM tblSessions s WHERE s.teacher_id = %s"
+            "EXISTS(SELECT 1 FROM tblattendance a WHERE a.session_id = s.session_id) AS attendance_taken "
+            "FROM tblsessions s WHERE s.teacher_id = %s"
         )
         cursor.execute(read_query, (user_id,))
         result = cursor.fetchall()
@@ -160,7 +160,7 @@ def f_add_session(data):
             }
 
         insert_query = """
-            INSERT INTO tblSessions (teacher_id, session_date, participating_section, sponsors, foods_serve)
+            INSERT INTO tblsessions (teacher_id, session_date, participating_section, sponsors, foods_serve)
                 VALUES(%s, %s, %s, %s, %s)
             ;
             """
@@ -191,7 +191,7 @@ def f_set_cancel_session(data):
 
     try:
     # UPDATE TASK
-        update_query = "UPDATE tblSessions SET status='cancelled' WHERE session_id=%s AND teacher_id=%s"
+        update_query = "UPDATE tblsessions SET status='cancelled' WHERE session_id=%s AND teacher_id=%s"
         cursor.execute(update_query, (session_id, user_id))
         mysqldb.commit()
     
@@ -216,7 +216,7 @@ def f_set_complete_session(data):
 
     try:
     # UPDATE TASK
-        update_query = "UPDATE tblSessions SET status='completed' WHERE session_id=%s AND teacher_id=%s"
+        update_query = "UPDATE tblsessions SET status='completed' WHERE session_id=%s AND teacher_id=%s"
         cursor.execute(update_query, (session_id, user_id))
         mysqldb.commit()
     
@@ -243,17 +243,17 @@ def f_delete_session(data):
 
     try:
         # Ensure the session belongs to the requesting teacher before deleting anything.
-        verify_query = "SELECT 1 FROM tblSessions WHERE teacher_id = %s AND session_id = %s LIMIT 1"
+        verify_query = "SELECT 1 FROM tblsessions WHERE teacher_id = %s AND session_id = %s LIMIT 1"
         cursor.execute(verify_query, (user_id, session_id))
         owned_session = cursor.fetchone()
         if not owned_session:
             return { 'status': False, 'message': 'Session not found or unauthorized' }
 
         # Delete attendance rows tied to this session first (no orphan attendance).
-        delete_attendance_query = "DELETE FROM tblAttendance WHERE session_id = %s"
+        delete_attendance_query = "DELETE FROM tblattendance WHERE session_id = %s"
         cursor.execute(delete_attendance_query, (session_id,))
 
-        delete_query = "DELETE FROM tblSessions WHERE teacher_id = %s AND session_id = %s"
+        delete_query = "DELETE FROM tblsessions WHERE teacher_id = %s AND session_id = %s"
         cursor.execute(delete_query, (user_id, session_id))
         mysqldb.commit()
 
@@ -306,7 +306,7 @@ def f_update_session_information(data):
             }
 
         update_query = """
-            UPDATE tblSessions
+            UPDATE tblsessions
             SET session_date=%s, participating_section=%s, sponsors=%s, foods_serve=%s
             WHERE session_id=%s AND teacher_id=%s
         """
@@ -339,7 +339,7 @@ def _f_get_session_dashboard_summary(user_id):
     try:
         nearest_query = """
             SELECT session_id, session_date, status, created_at, updated_at
-            FROM tblSessions
+            FROM tblsessions
             WHERE teacher_id = %s AND session_date >= CURRENT_DATE
             ORDER BY session_date
             LIMIT 1
@@ -349,7 +349,7 @@ def _f_get_session_dashboard_summary(user_id):
 
         total_completed_query = """
             SELECT COUNT(*) AS total_completed
-            FROM tblSessions
+            FROM tblsessions
             WHERE status = 'completed' AND teacher_id = %s
         """
         cursor.execute(total_completed_query, (user_id,))

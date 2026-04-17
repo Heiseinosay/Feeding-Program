@@ -17,7 +17,7 @@ def f_add_section(data):
         grade_level = 0
 
     try:        
-        cursor.execute("SELECT COALESCE(MAX(section_seq), 2000) + 1 FROM tblSections")
+        cursor.execute("SELECT COALESCE(MAX(section_seq), 2000) + 1 FROM tblsections")
         next_seq_row = cursor.fetchone()
         next_seq = next_seq_row[0] if next_seq_row and next_seq_row[0] else 2001
 
@@ -25,7 +25,7 @@ def f_add_section(data):
         no_spaces_section_id = section_id.replace(" ", "")
 
         insert_query = """
-            INSERT INTO tblSections(section_id, section_seq, section_name, grade_level, teacher_id)
+            INSERT INTO tblsections(section_id, section_seq, section_name, grade_level, teacher_id)
                 VALUES(%s, %s, %s, %s, %s)
             ;
             """
@@ -59,7 +59,7 @@ def f_get_all_section(data):
 
     try:
         read_query = (
-            "SELECT * FROM tblSections WHERE teacher_id = %s"
+            "SELECT * FROM tblsections WHERE teacher_id = %s"
         )
         cursor.execute(read_query, (user_id,))
         result = cursor.fetchall()
@@ -135,7 +135,7 @@ def f_update_section(data):
 
     try:
     # UPDATE TASK
-        update_query = "UPDATE tblSections SET section_name=%s, grade_level=%s  WHERE section_id=%s AND teacher_id=%s"
+        update_query = "UPDATE tblsections SET section_name=%s, grade_level=%s  WHERE section_id=%s AND teacher_id=%s"
         cursor.execute(update_query, (new_section_name, new_grade_level, section_id, user_id))
         mysqldb.commit()
     
@@ -160,10 +160,10 @@ def f_delete_section(data):
         return { 'status': False, 'message': 'Missing userId or sectionId' }
 
     try:
-        delete_query = "DELETE FROM tblSections WHERE teacher_id = %s AND section_id = %s"
+        delete_query = "DELETE FROM tblsections WHERE teacher_id = %s AND section_id = %s"
         cursor.execute(delete_query, (user_id, section_id))
 
-        delete_query = "DELETE FROM tblStudents WHERE teacher_id = %s AND section_id = %s"
+        delete_query = "DELETE FROM tblstudents WHERE teacher_id = %s AND section_id = %s"
         cursor.execute(delete_query, (user_id, section_id))
         mysqldb.commit()
 

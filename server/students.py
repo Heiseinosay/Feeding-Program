@@ -9,7 +9,7 @@ def f_fetch_section_id(user_id, grade, section):
     print("Im in f_fetch_section_id!")
     try:
         read_query = (
-            "SELECT section_id FROM tblSections WHERE teacher_id=%s AND grade_level=%s AND section_name=%s"
+            "SELECT section_id FROM tblsections WHERE teacher_id=%s AND grade_level=%s AND section_name=%s"
         )
         cursor.execute(read_query, (user_id, grade, section))
         result = cursor.fetchone()
@@ -56,7 +56,7 @@ def f_add_students(data):
     
     try:        
         insert_query = """
-            INSERT INTO tblStudents (first_name, middle_name, last_name, sex, age, grade_level, section_id, section_name, height_cm, weight_kg, bmi, bmi_measurement, measurement_date, teacher_id)
+            INSERT INTO tblstudents (first_name, middle_name, last_name, sex, age, grade_level, section_id, section_name, height_cm, weight_kg, bmi, bmi_measurement, measurement_date, teacher_id)
                 VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, JSON_ARRAY(%s), JSON_ARRAY(%s), JSON_ARRAY(CURRENT_DATE), %s)
             ;
             """
@@ -92,7 +92,7 @@ def f_get_all_students(user_id):
 
     try:
         read_query = (
-            "SELECT * FROM tblStudents WHERE teacher_id = %s"
+            "SELECT * FROM tblstudents WHERE teacher_id = %s"
         )
         cursor.execute(read_query, (user_id,))
         result = cursor.fetchall()
@@ -125,7 +125,7 @@ def f_add_students_attendance(data):
             return { 'status': False, 'message': 'No attendance rows' }
 
         insert_query = """
-            INSERT INTO tblAttendance (student_id, session_id, section_id, present, remarks)
+            INSERT INTO tblattendance (student_id, session_id, section_id, present, remarks)
             VALUES (%s, %s, %s, %s, %s)
         """
 
@@ -177,7 +177,7 @@ def f_delete_student(data):
         return { 'status': False, 'message': 'Missing userId or studentId' }
 
     try:
-        delete_query = "DELETE FROM tblStudents WHERE teacher_id = %s AND student_id = %s"
+        delete_query = "DELETE FROM tblstudents WHERE teacher_id = %s AND student_id = %s"
         cursor.execute(delete_query, (user_id, student_id))
         mysqldb.commit()
 
@@ -238,13 +238,13 @@ def f_update_bmi_measurement(data):
 
         select_query = """
             SELECT bmi, bmi_measurement, measurement_date
-            FROM tblStudents
+            FROM tblstudents
             WHERE student_id=%s AND teacher_id=%s
             LIMIT 1
         """
 
         update_query = """
-            UPDATE tblStudents
+            UPDATE tblstudents
             SET
                 height_cm=%s,
                 weight_kg=%s,
@@ -340,7 +340,7 @@ def f_update_student_information(data):
     try:
     # UPDATE TASK
         update_query = """
-            UPDATE tblStudents 
+            UPDATE tblstudents 
             SET first_name=%s, middle_name=%s, last_name=%s, sex=%s, age=%s
             WHERE student_id=%s AND teacher_id=%s
         """
@@ -374,7 +374,7 @@ def f_get_student_attendance(student_id):
         read_query = (
             """
                 SELECT * 
-                FROM tblAttendance 
+                FROM tblattendance 
                 WHERE student_id = %s
             """
         )
@@ -417,7 +417,7 @@ def f_get_all_student_attendance(user_id):
                 )
 
                 SELECT *
-                FROM tblAttendance
+                FROM tblattendance
                 WHERE section_id IN (
                         SELECT * FROM sections
                     )
@@ -501,7 +501,7 @@ def f_update_student_measurement_targeted(data):
 
         select_query = """
             SELECT bmi, bmi_measurement, measurement_date
-            FROM tblStudents
+            FROM tblstudents
             WHERE student_id=%s AND teacher_id=%s
             LIMIT 1
         """
@@ -533,7 +533,7 @@ def f_update_student_measurement_targeted(data):
             date_history.append(today)
 
         update_query = """
-            UPDATE tblStudents
+            UPDATE tblstudents
             SET
                 height_cm=%s,
                 weight_kg=%s,

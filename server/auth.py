@@ -17,7 +17,7 @@ def f_auth_login(mail, password, remember, is_from_change_pwd):
     try:
         read_query = (
             "SELECT teacher_id, first_name, last_name, email, Password, mobile_no, is_first_login "
-            "FROM tblTeachers WHERE email = %s AND Password = %s"
+            "FROM tblteachers WHERE email = %s AND Password = %s"
         )
         cursor.execute(read_query, (mail, password))
         result = cursor.fetchone()
@@ -80,7 +80,7 @@ def f_me(user_id):
     try:
         read_query = (
             "SELECT teacher_id, first_name, middle_name, last_name, email, mobile_no, is_first_login, school_name, created_at "
-            "FROM tblTeachers WHERE teacher_id = %s"
+            "FROM tblteachers WHERE teacher_id = %s"
         )
         cursor.execute(read_query, (user_id,))
         result = cursor.fetchone()
@@ -140,7 +140,7 @@ def f_auth_first_update_password(data):
 
     mysqldb, cursor = connect_to_db()
     try:
-        update_query = "UPDATE tblTeachers SET Password=%s, is_first_login=0  WHERE teacher_id = %s"
+        update_query = "UPDATE tblteachers SET Password=%s, is_first_login=0  WHERE teacher_id = %s"
         cursor.execute(update_query, (new_password, uid))
         mysqldb.commit()
 
@@ -168,7 +168,7 @@ def f_auth_update_user_information(data):
     try:
     # UPDATE TASK
         update_query = """
-            UPDATE tblTeachers 
+            UPDATE tblteachers 
             SET first_name=%s, middle_name=%s, last_name=%s, mobile_no=%s
             WHERE teacher_id=%s
         """

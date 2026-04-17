@@ -1,8 +1,8 @@
 from typing import Any
 
 
-TABLE_NAME = "tblStudents"
-ATTENDANCE_TABLE_NAME = "tblAttendance"
+TABLE_NAME = "tblstudents"
+ATTENDANCE_TABLE_NAME = "tblattendance"
 AT_RISK_TYPES = ("underweight", "overweight")
 BMI_CATEGORIES = ("underweight", "normal", "overweight")
 CAPABILITY_EXAMPLES = [
