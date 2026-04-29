@@ -464,8 +464,120 @@
   .login-section {
     padding: 1rem;
   }
-  
+
   .social-buttons {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Height-constrained screens (short phones, landscape, etc.) */
+@media (max-height: 760px) {
+  .login-section {
+    padding: 1rem;
+  }
+
+  .brand-section {
+    margin-bottom: 1rem;
+  }
+
+  .logo-icon {
+    margin-bottom: 0.5rem;
+  }
+
+  .logo-deped {
+    width: 5rem;
+    height: 5rem;
+  }
+
+  .logo-feedprogram {
+    width: 8rem;
+    height: 8rem;
+  }
+
+  .login-form {
+    margin-top: 1rem;
+  }
+
+  .form-group {
+    margin-bottom: 1rem;
+  }
+
+  .form-input {
+    height: 2.5rem;
+  }
+
+  .remember-me {
+    margin-bottom: 1rem;
+  }
+
+  .submit-button {
+    height: 2.75rem;
+  }
+
+  .divider {
+    margin: 1rem 0;
+  }
+}
+
+/* Narrow phones in portrait */
+@media (max-width: 480px) {
+  .brand-title {
+    font-size: 20px;
+  }
+
+  .brand-subtitle {
+    font-size: 0.875rem;
+  }
+
+  .logo-deped {
+    width: 4.5rem;
+    height: 4.5rem;
+  }
+
+  .logo-feedprogram {
+    width: 7rem;
+    height: 7rem;
+  }
+}
+
+/* Very tight viewports (short + narrow combined) */
+@media (max-height: 600px) {
+  .brand-section {
+    margin-bottom: 0.5rem;
+  }
+
+  .logo-deped {
+    width: 4rem;
+    height: 4rem;
+  }
+
+  .logo-feedprogram {
+    width: 6rem;
+    height: 6rem;
+  }
+
+  .login-form {
+    margin-top: 0.5rem;
+  }
+
+  .form-group {
+    margin-bottom: 0.75rem;
+  }
+
+  .form-input {
+    height: 2.25rem;
+    font-size: 0.9375rem;
+  }
+
+  .submit-button {
+    height: 2.5rem;
+  }
+
+  .remember-me {
+    margin-bottom: 0.75rem;
+  }
+
+  .divider {
+    margin: 0.75rem 0;
   }
 }

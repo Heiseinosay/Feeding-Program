@@ -14,7 +14,8 @@ def f_fetch_section_id(user_id, grade, section):
         cursor.execute(read_query, (user_id, grade, section))
         result = cursor.fetchone()
 
-        print(result[0])
+        # print(result[0])
+        print(result)
 
         return result[0]
     except Error as e:
@@ -28,7 +29,7 @@ def f_fetch_section_id(user_id, grade, section):
 def f_add_students(data):
     mysqldb, cursor = connect_to_db()
     print("Im in f_add_students!")
-    print(data)
+    # print(data)
     first_name = data.get("firstName")
     middle_name = data.get("middleName")
     last_name = data.get("lastName")
@@ -43,10 +44,10 @@ def f_add_students(data):
     bmiStatus = data.get("bmiStatus")
     user_id =  data.get("userId")
 
-    if grade == "Pre-elementary":
+    if grade == "Kinder":
         grade = 0
     else:
-        grade = 8
+        grade = 7
 
     section_id = f_fetch_section_id(user_id, grade, section)
     print(section_id)
@@ -56,13 +57,13 @@ def f_add_students(data):
     
     try:        
         insert_query = """
-            INSERT INTO tblstudents (first_name, middle_name, last_name, sex, age, grade_level, section_id, section_name, height_cm, weight_kg, bmi, bmi_measurement, measurement_date, teacher_id)
+            INSERT INTO tblstudents (first_name, middle_name, last_name, sex, age, grade_level, section_id, section_name, height_m, weight_kg, bmi, bmi_measurement, measurement_date, teacher_id)
                 VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, JSON_ARRAY(%s), JSON_ARRAY(%s), JSON_ARRAY(CURRENT_DATE), %s)
             ;
             """
 
         record = (first_name, middle_name, last_name, sex, age, grade, section_id, section, height, weight, bmi, bmiStatus, user_id)        
-        # print(record)
+        print(record)
 
         cursor.execute(insert_query, record)
         mysqldb.commit()
@@ -246,7 +247,7 @@ def f_update_bmi_measurement(data):
         update_query = """
             UPDATE tblstudents
             SET
-                height_cm=%s,
+                height_m=%s,
                 weight_kg=%s,
                 bmi=%s,
                 bmi_measurement=%s,
@@ -491,7 +492,7 @@ def f_update_student_measurement_targeted(data):
 
         try:
             bmi_value = round(float(bmi), 1)
-            height_value = round(float(height), 1)
+            height_value = round(float(height), 2)
             weight_value = round(float(weight), 1)
         except (TypeError, ValueError):
             return { 'status': False, 'message': 'Invalid measurement values' }
@@ -535,7 +536,7 @@ def f_update_student_measurement_targeted(data):
         update_query = """
             UPDATE tblstudents
             SET
-                height_cm=%s,
+                height_m=%s,
                 weight_kg=%s,
                 bmi=%s,
                 bmi_measurement=%s,

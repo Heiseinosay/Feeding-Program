@@ -12,6 +12,7 @@ import Loading from '../components/Loading';
 // Images
 import Logo from '../images/logo.png'
 
+
 function Students() {
     const navigate = useNavigate()
     const location = useLocation()
@@ -54,6 +55,25 @@ function Students() {
         grade: "",
     });
 
+
+
+    // Cleans a name-like text input: trims, collapses internal whitespace,
+    // blocks symbols (allows letters, digits, spaces, and dashes), and
+    // title-cases each word (first letter of every word).
+    // Returns { ok: true, value: cleaned } on success, or
+    // { ok: false, reason: "symbols" } when invalid characters are present.
+    const cleanName = (raw) => {
+        const trimmed = String(raw ?? "").trim().replace(/\s+/g, " ");
+        if (!trimmed) return { ok: true, value: "" };
+        if (/[^a-zA-Z0-9 -]/.test(trimmed)) {
+            return { ok: false, reason: "symbols" };
+        }
+        return {
+            ok: true,
+            value: trimmed.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()),
+        };
+    };
+
     // Add Section handlers
     const handleAddSectionFormChange = (e) => {
         const { name, value } = e.target;
@@ -64,7 +84,12 @@ function Students() {
     };
 
     const handleAddSection = () => {
-        const sectionName = addSectionForm.name.trim();
+        const cleanedSection = cleanName(addSectionForm.name);
+        if (!cleanedSection.ok) {
+            alert("Section name cannot contain symbols. Please use letters and numbers only.");
+            return;
+        }
+        const sectionName = cleanedSection.value;
         const sectionGrade = addSectionForm.grade.trim();
         // console.log(sectionGrade)
 
@@ -183,7 +208,12 @@ function Students() {
         return;
         }
 
-        const trimmedName = editForm.name.trim();
+        const cleanedSection = cleanName(editForm.name);
+        if (!cleanedSection.ok) {
+            alert("Section name cannot contain symbols. Please use letters and numbers only.");
+            return;
+        }
+        const trimmedName = cleanedSection.value;
         const trimmedGrade = editForm.grade.trim();
 
         if (!trimmedName || !trimmedGrade) {
@@ -450,8 +480,8 @@ function Students() {
         if (lower.startsWith("grade")) {
             return text;
         }
-        if (["pre-elementary", "pre elementary", "preelementary", "0"].includes(lower)) {
-            return "Pre-elementary";
+        if (["pre-elementary", "pre elementary", "preelementary", "0", "kinder"].includes(lower)) {
+            return "Kinder";
         }
         return `Grade ${text}`;
     };
@@ -540,8 +570,8 @@ function Students() {
                 gradeLevel,
                 sectionId,
                 sectionName,
-                heightCm,
-                weightCm,
+                heightM,
+                weightKg,
                 bmi,
                 bmiMeasurement,
                 measurementDate,
@@ -562,8 +592,8 @@ function Students() {
                 lastName: lastName ?? "",
                 age: age ?? "",
                 sex: formatSexLabel(sex),
-                height: heightCm ?? "",
-                weight: weightCm ?? "",
+                height: heightM ?? "",
+                weight: weightKg ?? "",
                 bmi: getLatestMeasurement(bmi) ?? "",
                 bmiStatus: getLatestBMIStatus(bmiMeasurement),
                 lastMeasurement: getLatestMeasurement(measurementDate) || "No data",
@@ -604,8 +634,8 @@ function Students() {
             lastName,
             age: student.age ?? "",
             sex: formatSexLabel(student.sex),
-            height: student.height ?? student.height_cm ?? "",
-            weight: student.weight ?? student.weight_cm ?? "",
+            height: student.height ?? "",
+            weight: student.weight ?? "",
             bmi: getLatestMeasurement(student.bmi) ?? "",
             bmiStatus: getLatestBMIStatus(student.bmiStatus ?? student.bmi_measurement ?? student.bmi_status ?? "normal"),
             lastMeasurement: student.lastMeasurement ?? student.last_measurement ?? getLatestMeasurement(student.measurement_date) ?? "No data",
@@ -776,11 +806,14 @@ function Students() {
     };
 
     const getLastNameForSort = (fullName) => {
-        const parts = String(fullName ?? "").trim().split(/\s+/).filter(Boolean);
-        if (!parts.length) {
-            return "";
+        const str = String(fullName ?? "").trim();
+        if (!str) return "";
+        const commaIndex = str.indexOf(",");
+        if (commaIndex >= 0) {
+            return str.slice(0, commaIndex).trim();
         }
-        return parts[parts.length - 1];
+        const parts = str.split(/\s+/).filter(Boolean);
+        return parts[0] ?? "";
     };
 
     const filteredStudents = students
@@ -932,17 +965,11 @@ function Students() {
         return parsed;
     };
 
-    const getMeasurementBMI = (weightKg, heightCm) => {
+    const getMeasurementBMI = (weightKg, heightM) => {
         const weight = parseMeasurementValue(weightKg);
-        const height = parseMeasurementValue(heightCm);
-        if (!weight || !height) {
-            return null;
-        }
-        const heightM = height / 100;
-        if (heightM <= 0) {
-            return null;
-        }
-        return weight / (heightM * heightM);
+        const height = parseMeasurementValue(heightM);
+        if (!weight || !height) return null;
+        return weight / (height * height);
     };
 
     const getBMIStatusFromValue = (bmi) => {
@@ -1700,7 +1727,7 @@ function Students() {
         if (!isEditingStudent && !formData.section.trim()) {
         errors.section = "Section is required";
         }
-        if (!isEditingStudent && (!formData.height || parseInt(formData.height) < 1)) {
+        if (!isEditingStudent && (!formData.height || parseFloat(formData.height) <= 0)) {
         errors.height = "Valid height is required";
         }
         if (!isEditingStudent && (!formData.weight || parseInt(formData.weight) < 1)) {
@@ -1771,7 +1798,7 @@ function Students() {
         setLoadingAddStudent(true);
         
         // Calculate BMI
-        const heightInMeters = parseInt(formData.height) / 100;
+        const heightInMeters = parseFloat(formData.height);
         const weightInKg = parseInt(formData.weight);
         const bmi = parseFloat((weightInKg / (heightInMeters * heightInMeters)).toFixed(1));
         
@@ -1785,22 +1812,21 @@ function Students() {
         // }
         
         const studentName = buildStudentFullName(formData.lastName, formData.firstName, formData.middleName);
-        
+
         const payload = {
-        firstName: formData.firstName.trim(),
-        middleName: formData.middleName.trim(),
-        lastName: formData.lastName.trim(),
+        firstName: cleanName(formData.firstName.trim()).value,
+        middleName: cleanName(formData.middleName.trim()).value,
+        lastName: cleanName(formData.lastName.trim()).value,
         sex: formData.sex,
         age: parseInt(formData.age),
         grade: formData.grade.trim(),
         section: formData.section,
-        height: parseInt(formData.height),
+        height: parseFloat(formData.height),
         weight: parseInt(formData.weight),
         bmi,
         bmiStatus,
         userId: user.id
         };
-        
         // console.log(payload)
         axios.post(`/api/add_students`, payload)
             .then((response) => {
@@ -2022,6 +2048,7 @@ function Students() {
     const openStudentProfileModal = (student) => {
         setSelectedStudent(student);
         fetchStudentAttendance(student?.id);
+        handleCloseAddPanel()
     };
 
     const handleDeleteStudent = () => {
@@ -2440,8 +2467,8 @@ function Students() {
                                 className="section-edit-input"
                                 >
                                 <option value="">Select grade</option>
-                                <option value="Pre-elementary">Pre-elementary</option>
-                                <option value="Grade 8">Grade 8</option>
+                                <option value="Kinder">Kinder</option>
+                                <option value="Grade 7">Grade 7</option>
                                 </select>
                             </div>
                             </div>
@@ -2517,8 +2544,8 @@ function Students() {
                                 className="section-edit-input"
                                 >
                                 <option value="">Select grade</option>
-                                <option value="Pre-elementary">Pre-elementary</option>
-                                <option value="Grade 8">Grade 8</option>
+                                <option value="Kinder">Kinder</option>
+                                <option value="Grade 7">Grade 7</option>
                                 </select>
                             </div>
 
@@ -2592,7 +2619,7 @@ function Students() {
                                 Sex
                                 </th>
                                 <th onClick={() => handleSort("height")}>
-                                Height (cm)
+                                Height (m)
                                 </th>
                                 <th onClick={() => handleSort("weight")}>
                                 Weight (kg)
@@ -2790,7 +2817,7 @@ function Students() {
                             <tr>
                             <th>Full Name</th>
                             <th>Weight (kg)</th>
-                            <th>Height (cm)</th>
+                            <th>Height (m)</th>
                             <th>BMI Status</th>
                             </tr>
                         </thead>
@@ -2821,8 +2848,8 @@ function Students() {
                                         type="number"
                                         className="students-form-input students-measurement-input"
                                         value={heightValue}
-                                        min="1"
-                                        step="0.1"
+                                        min="0.1"
+                                        step="0.01"
                                         placeholder="0"
                                         onChange={(e) => handleMeasurementChange(student.id, "height", e.target.value)}
                                     />
@@ -2931,13 +2958,13 @@ function Students() {
                                 </div>
 
                                 <div className="students-form-field">
-                                    <label className="students-form-label required">Height (cm)</label>
+                                    <label className="students-form-label required">Height (m)</label>
                                     <input
                                         type="number"
                                         className="students-form-input"
                                         value={targetedMeasurementForm.height}
-                                        min="1"
-                                        step="0.1"
+                                        min="0.1"
+                                        step="0.01"
                                         placeholder="0"
                                         onChange={(e) => handleTargetedMeasurementChange("height", e.target.value)}
                                     />
@@ -3038,7 +3065,7 @@ function Students() {
                         </div>
                         <div className="students-info-item">
                             <label>Height</label>
-                            <div className="value">{selectedStudent.height} cm</div>
+                            <div className="value">{selectedStudent.height} m</div>
                         </div>
                         <div className="students-info-item">
                             <label>Weight</label>
@@ -3437,16 +3464,17 @@ function Students() {
                     </div>
 
                     <div className="students-form-field">
-                    <label className="students-form-label required">Height (cm)</label>
+                    <label className="students-form-label required">Height (m)</label>
                     <input
                         type="number"
                         name="height"
                         value={formData.height}
                         onChange={handleInputChange}
                         className={`students-form-input ${formErrors.height ? "error" : ""}`}
-                        placeholder="Enter height in cm"
-                        min="1"
-                        max="250"
+                        placeholder="Enter height in m"
+                        min="0.1"
+                        max="2.5"
+                        step="0.01" 
                         disabled={Boolean(editingStudentMeta)}
                     />
                     {formErrors.height && (

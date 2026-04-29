@@ -11,8 +11,8 @@ def f_add_section(data):
     last_name = data.get("lastName")
     section_name = data.get("sectionName")
     grade_level = data.get("grade")
-    if grade_level == "Grade 8":
-        grade_level = 8
+    if grade_level == "Grade 7":
+        grade_level = 7
     else:
         grade_level = 0
 
@@ -75,7 +75,7 @@ def f_get_all_section(data):
 
             grade_text = ""
             if grade_level == 0:
-                grade_text = "Pre-elementary"
+                grade_text = "Kinder"
             else:
                 grade_text = "Grade " + str(grade_level)
 
@@ -126,8 +126,8 @@ def f_update_section(data):
     last_name = data.get("lastName")
     section_id = data.get("sectionId")
 
-    if new_grade_level == "Grade 8":
-        new_grade_level = 8
+    if new_grade_level == "Grade 7":
+        new_grade_level = 7
     else:
         new_grade_level = 0
 
